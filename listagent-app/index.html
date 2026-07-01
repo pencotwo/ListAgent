@@ -12,6 +12,14 @@
       <header id="toolbar">
         <h1 id="app-title">📋 ListAgent</h1>
         <div class="toolbar-actions">
+          <div class="theme-selector-container">
+            <select id="select-theme" class="theme-select" aria-label="切換主題樣式">
+              <option value="default">🌐 系統預設</option>
+              <option value="glass-neon">🔮 玻璃霓虹</option>
+              <option value="cherry-blossom">🌸 櫻花粉櫻</option>
+              <option value="cyberpunk-amber">⚡ 琥珀科技</option>
+            </select>
+          </div>
           <button id="btn-events" title="事件設定" aria-label="事件設定">⏰</button>
           <button id="btn-add" title="新增項目">＋</button>
         </div>
@@ -162,47 +170,48 @@
         </div>
 
         <div class="dialog-body events-dialog-body">
-          <div class="http-trigger-section">
-            <label class="tool-option">
-              <input type="checkbox" id="input-enable-http" />
-              允許透過 HTTP 請求執行 Agent 任務（監聽埠：37123）
-            </label>
-            <p class="http-hint">啟用後，可透過 GET 或 POST 請求 <code>http://127.0.0.1:37123/input?agent=項目名稱</code> 來觸發任務。</p>
-          </div>
+          <fieldset class="event-group">
+            <legend>🌐 允許透過 HTTP 請求執行 Agent 任務（監聽埠：37123）</legend>
+            <div id="http-agents-list" class="http-agents-list"></div>
+            <p class="http-hint">勾選代表該 Agent 可以接收 HTTP 請求；啟用後，可透過 GET 或 POST 請求 <code>http://127.0.0.1:37123/input?agent=項目名稱</code> 來觸發任務。</p>
+          </fieldset>
 
-          <div class="event-create-grid">
-            <div class="event-field">
-              <label class="form-label" for="input-event-time">觸發時間</label>
-              <input id="input-event-time" class="form-input" type="datetime-local" step="1" />
+          <fieldset class="event-group">
+            <legend>⏰ 排程事件設定</legend>
+            <div class="event-create-grid">
+              <div class="event-field">
+                <label class="form-label" for="input-event-time">觸發時間</label>
+                <input id="input-event-time" class="form-input" type="datetime-local" step="1" />
+              </div>
+              <div class="event-field">
+                <label class="form-label" for="select-event-agent">執行 Agent</label>
+                <select id="select-event-agent" class="form-select"></select>
+              </div>
+              <div class="event-field">
+                <label class="form-label" for="select-event-recurrence">事件類型</label>
+                <select id="select-event-recurrence" class="form-select">
+                  <option value="once">一次性</option>
+                  <option value="interval">循環事件</option>
+                </select>
+              </div>
+              <button id="btn-add-event" class="btn btn-primary" type="button">新增</button>
+              <div id="event-interval-fields" class="event-interval-fields hidden">
+                <span class="form-label">循環間隔：每</span>
+                <input id="input-event-interval" class="form-input" type="number" min="1" step="1" value="1" />
+                <select id="select-event-interval-unit" class="form-select">
+                  <option value="minutes">分鐘</option>
+                  <option value="hours">小時</option>
+                  <option value="days">天</option>
+                </select>
+                <span class="form-label">執行一次</span>
+              </div>
             </div>
-            <div class="event-field">
-              <label class="form-label" for="select-event-agent">執行 Agent</label>
-              <select id="select-event-agent" class="form-select"></select>
-            </div>
-            <div class="event-field">
-              <label class="form-label" for="select-event-recurrence">事件類型</label>
-              <select id="select-event-recurrence" class="form-select">
-                <option value="once">一次性</option>
-                <option value="interval">循環事件</option>
-              </select>
-            </div>
-            <button id="btn-add-event" class="btn btn-primary" type="button">新增</button>
-            <div id="event-interval-fields" class="event-interval-fields hidden">
-              <span class="form-label">循環間隔：每</span>
-              <input id="input-event-interval" class="form-input" type="number" min="1" step="1" value="1" />
-              <select id="select-event-interval-unit" class="form-select">
-                <option value="minutes">分鐘</option>
-                <option value="hours">小時</option>
-                <option value="days">天</option>
-              </select>
-              <span class="form-label">執行一次</span>
-            </div>
-          </div>
 
-          <div id="events-list" class="events-list"></div>
+            <div id="events-list" class="events-list"></div>
+          </fieldset>
 
-          <div class="event-mapping-section">
-            <h3 class="section-title">🔗 事件訂閱（當自訂事件觸發時執行 Agent）</h3>
+          <fieldset class="event-group">
+            <legend>🔗 事件訂閱（當自訂事件觸發時執行 Agent）</legend>
             <div class="event-mapping-create-grid">
               <div class="event-field">
                 <label class="form-label" for="input-mapping-event-id">事件 ID</label>
@@ -214,8 +223,8 @@
               </div>
               <button id="btn-add-mapping" class="btn btn-primary" type="button">新增訂閱</button>
             </div>
-            <div id="event-mappings-list" class="event-mappings-list"></div>
-          </div>
+            <div id="event-mappings-list" class="events-list"></div>
+          </fieldset>
         </div>
 
         <div class="dialog-footer">

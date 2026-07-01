@@ -145,6 +145,11 @@ pub struct ListItem {
     #[serde(default)]
     #[serde(rename = "mcpServers")]
     pub mcp_servers: Vec<McpServerConfig>,
+    #[serde(default)]
+    pub memory: bool,
+    #[serde(default)]
+    #[serde(rename = "allowHttp")]
+    pub allow_http: bool,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]

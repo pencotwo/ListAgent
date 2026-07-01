@@ -165,13 +165,38 @@ body {
   min-height: 300px;
 }
 
+.event-group {
+  min-width: 0;
+  margin: 0;
+  padding: 16px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--bg-surface);
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.event-group legend {
+  padding: 0 8px;
+  color: var(--text-secondary);
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: 0.5px;
+}
+
 .event-create-grid {
   display: grid;
   grid-template-columns: minmax(210px, 1.25fr) minmax(120px, 1fr) minmax(100px, 0.8fr) auto;
   align-items: end;
   gap: 10px;
-  padding-bottom: 16px;
-  border-bottom: 1px solid var(--border);
+}
+
+.event-mapping-create-grid {
+  display: grid;
+  grid-template-columns: minmax(200px, 1.5fr) minmax(150px, 1.2fr) auto;
+  align-items: end;
+  gap: 10px;
 }
 
 .event-interval-fields {
@@ -196,16 +221,37 @@ body {
   min-width: 0;
 }
 
-.http-trigger-section {
-  padding: 12px;
-  background: var(--bg-surface);
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  margin-bottom: 14px;
+.http-agents-list {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px 12px;
+  max-height: 160px;
+  overflow-y: auto;
+  padding: 4px;
+}
+
+.http-agent-option {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  cursor: pointer;
+  color: var(--text-primary);
+  font-size: 13px;
+  padding: 6px 8px;
+  border-radius: var(--radius-sm);
+  transition: background 0.15s ease;
+}
+
+.http-agent-option:hover {
+  background: var(--bg-hover);
+}
+
+.http-agent-option input {
+  accent-color: var(--accent);
 }
 
 .http-hint {
-  margin: 6px 0 0 23px;
+  margin: 8px 0 0;
   color: var(--text-muted);
   font-size: 11px;
   line-height: 1.5;
@@ -1456,3 +1502,352 @@ body {
   .log-line.log-error   { color: #dc2626; }
   .log-line.log-system  { color: #7c3aed; }
 }
+
+/* ============================================================
+   設計變體主題 (Design Variations)
+   ============================================================ */
+
+/* 主題選擇器樣式 */
+.theme-selector-container {
+  display: flex;
+  align-items: center;
+  margin-right: 6px;
+}
+
+.theme-select {
+  padding: 6px 26px 6px 10px;
+  font-family: var(--sans);
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--text-primary);
+  background-color: var(--bg-surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  outline: none;
+  cursor: pointer;
+  appearance: none;
+  transition: all 0.2s ease;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%236b7280' stroke-width='2'%3E%3Cpath d='M6 9l6 6 6-6'/%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 8px center;
+}
+
+.theme-select:hover {
+  border-color: var(--accent);
+  background-color: var(--bg-hover);
+}
+
+.theme-select:focus {
+  border-color: var(--border-focus);
+  box-shadow: 0 0 0 2px var(--accent-light);
+}
+
+/* 🔮 玻璃霓虹 (Glass Neon) - 暗色玻璃風 */
+body.theme-glass-neon {
+  --bg-primary: #0a0813;
+  --bg-surface: rgba(22, 19, 48, 0.45);
+  --bg-hover: rgba(255, 255, 255, 0.08);
+  --text-primary: #ffffff;
+  --text-secondary: #c7d2fe;
+  --text-muted: #818cf8;
+  --border: rgba(255, 255, 255, 0.08);
+  --border-focus: #00f2fe;
+  --accent: #bd00ff;
+  --accent-hover: #e000ff;
+  --accent-light: rgba(189, 0, 255, 0.15);
+  --shadow-sm: 0 4px 6px rgba(0, 0, 0, 0.15);
+  --shadow-md: 0 8px 24px rgba(189, 0, 255, 0.12);
+  --shadow-lg: 0 20px 50px rgba(0, 0, 0, 0.35);
+  --radius: 12px;
+  --radius-sm: 8px;
+  background: radial-gradient(circle at 50% 50%, #150f38 0%, #060410 100%) no-repeat fixed;
+  color: var(--text-primary);
+}
+
+body.theme-glass-neon #app {
+  background: transparent;
+}
+
+body.theme-glass-neon #toolbar {
+  background: rgba(22, 19, 48, 0.6);
+  backdrop-filter: blur(12px);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+body.theme-glass-neon .item-card {
+  background: rgba(22, 19, 48, 0.45);
+  backdrop-filter: blur(10px);
+  border-color: rgba(255, 255, 255, 0.08);
+}
+
+body.theme-glass-neon .item-card:hover {
+  border-color: var(--border-focus);
+  box-shadow: 0 0 16px rgba(0, 242, 254, 0.15);
+  transform: translateY(-2px);
+}
+
+body.theme-glass-neon .item-card.selected {
+  border-color: var(--accent);
+  background: rgba(189, 0, 255, 0.15);
+  box-shadow: 0 0 20px rgba(189, 0, 255, 0.25);
+}
+
+body.theme-glass-neon .message-box {
+  background: linear-gradient(135deg, rgba(22, 19, 48, 0.75) 0%, rgba(12, 10, 31, 0.9) 100%);
+  backdrop-filter: blur(12px);
+  border-top: 2px solid var(--accent);
+}
+
+body.theme-glass-neon .dialog {
+  background: rgba(22, 19, 48, 0.85);
+  backdrop-filter: blur(20px);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+}
+
+body.theme-glass-neon .form-input,
+body.theme-glass-neon .form-textarea,
+body.theme-glass-neon .form-select,
+body.theme-glass-neon .model-group,
+body.theme-glass-neon .tool-group,
+body.theme-glass-neon .memory-group,
+body.theme-glass-neon .skill-group,
+body.theme-glass-neon .event-group,
+body.theme-glass-neon .mcp-group {
+  background: rgba(10, 8, 20, 0.5);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+body.theme-glass-neon .form-input:focus,
+body.theme-glass-neon .form-textarea:focus,
+body.theme-glass-neon .form-select:focus {
+  border-color: var(--border-focus);
+  box-shadow: 0 0 0 3px rgba(0, 242, 254, 0.15);
+}
+
+body.theme-glass-neon .btn-primary {
+  background: linear-gradient(135deg, #bd00ff 0%, #7d00ff 100%);
+  border: none;
+  box-shadow: 0 4px 12px rgba(189, 0, 255, 0.3);
+}
+
+body.theme-glass-neon .btn-primary:hover {
+  background: linear-gradient(135deg, #e000ff 0%, #bd00ff 100%);
+  box-shadow: 0 4px 16px rgba(189, 0, 255, 0.45);
+}
+
+/* 🌸 櫻花粉櫻 (Cherry Blossom) - 柔和粉色風 */
+body.theme-cherry-blossom {
+  --bg-primary: #fff5f6;
+  --bg-surface: #ffffff;
+  --bg-hover: #ffe4e6;
+  --text-primary: #4c0519;
+  --text-secondary: #9f1239;
+  --text-muted: #fda4af;
+  --border: #fecdd3;
+  --border-focus: #fb7185;
+  --accent: #ec4899;
+  --accent-hover: #db2777;
+  --accent-light: rgba(236, 72, 153, 0.08);
+  --shadow-sm: 0 2px 6px rgba(244, 63, 94, 0.05);
+  --shadow-md: 0 6px 16px rgba(244, 63, 94, 0.08);
+  --shadow-lg: 0 16px 40px rgba(244, 63, 94, 0.12);
+  --radius: 14px;
+  --radius-sm: 8px;
+  background: var(--bg-primary);
+  color: var(--text-primary);
+}
+
+body.theme-cherry-blossom #app {
+  background: var(--bg-primary);
+}
+
+body.theme-cherry-blossom #toolbar {
+  background: var(--bg-surface);
+  border-bottom-color: var(--border);
+}
+
+body.theme-cherry-blossom .item-card {
+  background: var(--bg-surface);
+  border-color: var(--border);
+  box-shadow: var(--shadow-sm);
+}
+
+body.theme-cherry-blossom .item-card:hover {
+  border-color: var(--border-focus);
+  background: var(--bg-hover);
+}
+
+body.theme-cherry-blossom .item-card.selected {
+  border-color: var(--accent);
+  background: #ffe4e6;
+  box-shadow: 0 0 0 3px rgba(236, 72, 153, 0.15);
+}
+
+body.theme-cherry-blossom .message-box {
+  background: linear-gradient(135deg, #fff5f6 0%, #ffe4e6 100%);
+  border-top-color: var(--accent);
+}
+
+body.theme-cherry-blossom .session-history-panel {
+  border-right-color: var(--border);
+}
+
+body.theme-cherry-blossom .session-history-header {
+  color: var(--text-secondary);
+  background: #ffe4e6;
+  border-bottom-color: var(--border);
+}
+
+body.theme-cherry-blossom .session-item:hover {
+  background: rgba(236, 72, 153, 0.08);
+}
+
+body.theme-cherry-blossom .session-item.active {
+  background: rgba(236, 72, 153, 0.15);
+}
+
+body.theme-cherry-blossom .dialog {
+  border-color: var(--border);
+}
+
+body.theme-cherry-blossom .form-input,
+body.theme-cherry-blossom .form-textarea,
+body.theme-cherry-blossom .form-select,
+body.theme-cherry-blossom .model-group,
+body.theme-cherry-blossom .tool-group,
+body.theme-cherry-blossom .memory-group,
+body.theme-cherry-blossom .skill-group,
+body.theme-cherry-blossom .event-group,
+body.theme-cherry-blossom .mcp-group {
+  background: var(--bg-surface);
+  border-color: var(--border);
+}
+
+body.theme-cherry-blossom .btn-primary {
+  background: var(--accent);
+  border-color: var(--accent);
+}
+
+body.theme-cherry-blossom .btn-primary:hover {
+  background: var(--accent-hover);
+  border-color: var(--accent-hover);
+}
+
+/* ⚡ 琥珀科技 (Cyberpunk Amber) - 高對比终端風 */
+body.theme-cyberpunk-amber {
+  --bg-primary: #050507;
+  --bg-surface: #0e0e12;
+  --bg-hover: #1e1e24;
+  --text-primary: #ffb703;
+  --text-secondary: #e5a93b;
+  --text-muted: #856a24;
+  --border: #2e2e38;
+  --border-focus: #fb8500;
+  --accent: #fb8500;
+  --accent-hover: #ffb703;
+  --accent-light: rgba(251, 133, 0, 0.15);
+  --shadow-sm: none;
+  --shadow-md: 0 0 10px rgba(251, 133, 0, 0.2);
+  --shadow-lg: 0 0 25px rgba(251, 133, 0, 0.3);
+  --radius: 0px;
+  --radius-sm: 0px;
+  background: var(--bg-primary);
+  color: var(--text-primary);
+  font-family: var(--mono);
+}
+
+body.theme-cyberpunk-amber #app {
+  background: var(--bg-primary);
+}
+
+body.theme-cyberpunk-amber #toolbar {
+  background: var(--bg-surface);
+  border-bottom: 2px solid var(--border);
+}
+
+body.theme-cyberpunk-amber #app-title {
+  font-family: var(--mono);
+  font-weight: 700;
+  text-transform: uppercase;
+}
+
+body.theme-cyberpunk-amber .item-card {
+  background: var(--bg-surface);
+  border: 1px solid var(--border);
+}
+
+body.theme-cyberpunk-amber .item-card:hover {
+  border-color: var(--border-focus);
+  background: var(--bg-hover);
+  transform: none;
+}
+
+body.theme-cyberpunk-amber .item-card.selected {
+  border: 2px solid var(--accent);
+  background: rgba(251, 133, 0, 0.08);
+  box-shadow: 0 0 10px rgba(251, 133, 0, 0.3);
+}
+
+body.theme-cyberpunk-amber .message-box {
+  background: #08080b;
+  border-top: 3px solid var(--accent);
+}
+
+body.theme-cyberpunk-amber .session-history-panel {
+  border-right: 1px solid var(--border);
+}
+
+body.theme-cyberpunk-amber .session-history-header {
+  color: var(--text-primary);
+  background: rgba(251, 133, 0, 0.1);
+  border-bottom: 1px solid var(--border);
+  font-family: var(--mono);
+}
+
+body.theme-cyberpunk-amber .session-item:hover {
+  background: rgba(251, 133, 0, 0.1);
+}
+
+body.theme-cyberpunk-amber .session-item.active {
+  background: rgba(251, 133, 0, 0.2);
+  border: 1px solid var(--accent);
+}
+
+body.theme-cyberpunk-amber .dialog {
+  border: 2px solid var(--border-focus);
+}
+
+body.theme-cyberpunk-amber .form-input,
+body.theme-cyberpunk-amber .form-textarea,
+body.theme-cyberpunk-amber .form-select,
+body.theme-cyberpunk-amber .model-group,
+body.theme-cyberpunk-amber .tool-group,
+body.theme-cyberpunk-amber .memory-group,
+body.theme-cyberpunk-amber .skill-group,
+body.theme-cyberpunk-amber .event-group,
+body.theme-cyberpunk-amber .mcp-group {
+  background: #000000;
+  border: 1px solid var(--border);
+  border-radius: 0;
+  color: var(--text-primary);
+  font-family: var(--mono);
+}
+
+body.theme-cyberpunk-amber .btn-primary {
+  background: var(--accent);
+  color: #000;
+  font-weight: 700;
+  text-transform: uppercase;
+}
+
+body.theme-cyberpunk-amber .btn-primary:hover {
+  background: var(--accent-hover);
+  color: #000;
+  box-shadow: 0 0 10px rgba(255, 183, 3, 0.5);
+}
+
+body.theme-cyberpunk-amber .item-code {
+  border-radius: 0;
+  background: rgba(251, 133, 0, 0.1);
+}
+

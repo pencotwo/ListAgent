@@ -51,6 +51,7 @@ interface ListItem {
   mcpServers: McpServerConfig[]
   mcpTools: string[]
   memory: boolean
+  allowHttp: boolean
 }
 
 type PersistedListItem = Omit<ListItem, 'code'>
@@ -142,7 +143,7 @@ const STORAGE_KEY_PRESETS = 'listagent_user_presets'
 const STORAGE_KEY_ITEMS = 'listagent_items'
 const STORAGE_KEY_NEXT_ID = 'listagent_next_id'
 const STORAGE_KEY_EVENTS = 'listagent_events'
-const STORAGE_KEY_ENABLE_HTTP = 'listagent_enable_http'
+// STORAGE_KEY_ENABLE_HTTP has been removed
 const STORAGE_KEY_EVENT_MAPPINGS = 'listagent_event_mappings'
 
 // ============================================================
@@ -155,7 +156,7 @@ let editingItemId: number | null = null
 let selectedItemId: number | null = null
 let scheduledEvents: ScheduledEvent[] = []
 let checkingScheduledEvents = false
-let enableHttpInput = true
+// enableHttpInput global state has been removed
 let eventMappings: EventMapping[] = []
 
 /** 由持久化 id 確定性產生 4 碼顯示代碼，不需另存 code 欄位 */
@@ -177,6 +178,7 @@ function hydrateItems(storedItems: PersistedListItem[]): ListItem[] {
     mcpServers: Array.isArray(item.mcpServers) ? item.mcpServers : [],
     mcpTools: Array.isArray(item.mcpTools) ? item.mcpTools : [],
     memory: typeof item.memory === 'boolean' ? item.memory : false,
+    allowHttp: typeof item.allowHttp === 'boolean' ? item.allowHttp : false,
   }))
 }
 
@@ -194,6 +196,7 @@ function getPersistedItems(): PersistedListItem[] {
     mcpServers: item.mcpServers,
     mcpTools: item.mcpTools,
     memory: item.memory,
+    allowHttp: item.allowHttp,
   }))
 }
 
@@ -379,7 +382,7 @@ const inputEventInterval = document.getElementById('input-event-interval') as HT
 const selectEventIntervalUnit = document.getElementById('select-event-interval-unit') as HTMLSelectElement
 const btnAddEvent = document.getElementById('btn-add-event') as HTMLButtonElement
 const eventsList = document.getElementById('events-list') as HTMLElement
-const inputEnableHttp = document.getElementById('input-enable-http') as HTMLInputElement
+const httpAgentsList = document.getElementById('http-agents-list') as HTMLElement
 const inputMappingEventId = document.getElementById('input-mapping-event-id') as HTMLInputElement
 const selectMappingAgent = document.getElementById('select-mapping-agent') as HTMLSelectElement
 const btnAddMapping = document.getElementById('btn-add-mapping') as HTMLButtonElement
@@ -464,11 +467,7 @@ function createItemCard(item: ListItem): HTMLElement {
     eventIcon.title = `事件：${itemEvents.length}（待執行／循環：${activeEvents.length}）`
   }
 
-  // 最左側：固定且唯一的 item 代碼
-  const codeEl = document.createElement('span')
-  codeEl.className = 'item-code'
-  codeEl.textContent = item.code
-  codeEl.title = `Agent ID：${item.code}`
+  // 最左側編號已移除，保留原排版結構
 
   // 項目資訊
   const info = document.createElement('div')
@@ -527,7 +526,21 @@ function createItemCard(item: ListItem): HTMLElement {
   })
 
   if (itemEvents.length > 0) card.appendChild(eventIcon)
-  card.appendChild(codeEl)
+  if (item.allowHttp) {
+    const httpIcon = document.createElement('span')
+    httpIcon.className = 'item-event-icon active'
+    httpIcon.textContent = '🌐'
+    httpIcon.title = '允許透過 HTTP 請求執行此 Agent 任務'
+    card.appendChild(httpIcon)
+  }
+  const itemMappings = eventMappings.filter((m) => m.agentId === item.id)
+  if (itemMappings.length > 0) {
+    const mappingIcon = document.createElement('span')
+    mappingIcon.className = 'item-event-icon active'
+    mappingIcon.textContent = '🔗'
+    mappingIcon.title = `事件訂閱：已訂閱 ${itemMappings.length} 個自訂事件（${itemMappings.map(m => m.eventId).join(', ')}）`
+    card.appendChild(mappingIcon)
+  }
   card.appendChild(info)
   card.appendChild(runBtn)
   card.appendChild(gearBtn)
@@ -764,6 +777,10 @@ async function drainHttpInputs(): Promise<void> {
       const item = items.find((candidate) => itemNameKey(candidate.name) === itemNameKey(input.agent))
       if (!item) {
         console.warn(`找不到名稱為「${input.agent}」的項目`)
+        return
+      }
+      if (!item.allowHttp) {
+        console.warn(`項目「${item.name}」未啟用 HTTP 接收功能`)
         return
       }
       void runItem(item.id, input.parameters)
@@ -1107,6 +1124,7 @@ async function saveUserPresets(presets: Preset[]): Promise<void> {
     try {
       const settings: SettingsFile = await invoke('read_settings')
       settings.userPresets = presets
+      settings.enableHttpInput = true
       await invoke('write_settings', { settings })
     } catch { /* Tauri 失敗時至少已存 localStorage */ }
   }
@@ -1139,6 +1157,7 @@ async function saveItems(): Promise<void> {
     try {
       const settings: SettingsFile = await invoke('read_settings')
       settings.items = persistedItems
+      settings.enableHttpInput = true
       await invoke('write_settings', { settings })
     } catch { /* Tauri 失敗時至少已存 localStorage */ }
   }
@@ -1168,35 +1187,13 @@ async function saveScheduledEvents(): Promise<void> {
     try {
       const settings: SettingsFile = await invoke('read_settings')
       settings.events = scheduledEvents
+      settings.enableHttpInput = true
       await invoke('write_settings', { settings })
     } catch { /* Tauri 失敗時至少已存 localStorage */ }
   }
 }
 
-async function loadEnableHttp(): Promise<boolean> {
-  if (isTauri()) {
-    try {
-      const settings: SettingsFile = await invoke('read_settings')
-      if (typeof settings.enableHttpInput === 'boolean') {
-        return settings.enableHttpInput
-      }
-    } catch { /* Fallback */ }
-  }
-  const raw = localStorage.getItem(STORAGE_KEY_ENABLE_HTTP)
-  return raw === null ? true : raw === 'true'
-}
-
-async function saveEnableHttp(val: boolean): Promise<void> {
-  enableHttpInput = val
-  localStorage.setItem(STORAGE_KEY_ENABLE_HTTP, String(val))
-  if (isTauri()) {
-    try {
-      const settings: SettingsFile = await invoke('read_settings')
-      settings.enableHttpInput = val
-      await invoke('write_settings', { settings })
-    } catch { /* Fallback */ }
-  }
-}
+// loadEnableHttp and saveEnableHttp have been removed
 
 async function loadEventMappings(): Promise<EventMapping[]> {
   if (isTauri()) {
@@ -1223,6 +1220,7 @@ async function saveEventMappings(): Promise<void> {
     try {
       const settings: SettingsFile = await invoke('read_settings')
       settings.eventMappings = eventMappings
+      settings.enableHttpInput = true
       await invoke('write_settings', { settings })
     } catch { /* Fallback */ }
   }
@@ -1231,33 +1229,41 @@ async function saveEventMappings(): Promise<void> {
 function renderEventMappings(): void {
   eventMappingsList.innerHTML = ''
   if (eventMappings.length === 0) {
-    eventMappingsList.innerHTML = '<span class="session-placeholder">（尚未有任何事件訂閱）</span>'
+    const empty = document.createElement('div')
+    empty.className = 'events-empty'
+    empty.textContent = '尚未設定事件訂閱'
+    eventMappingsList.appendChild(empty)
     return
   }
   eventMappings.forEach((mapping) => {
     const row = document.createElement('div')
-    row.className = 'event-mapping-row'
+    row.className = 'event-row'
 
     const badge = document.createElement('span')
-    badge.className = 'event-mapping-id-badge'
+    badge.className = 'event-time'
     badge.textContent = mapping.eventId
 
     const agentName = document.createElement('span')
-    agentName.className = 'event-mapping-agent-name'
+    agentName.className = 'event-agent'
     const agent = items.find((i) => i.id === mapping.agentId)
-    agentName.textContent = `→ 執行 Agent：${agent ? agent.name : '（未知的 Agent）'}`
+    agentName.textContent = agent ? agent.name : '找不到 Agent'
+
+    const status = document.createElement('span')
+    status.className = 'event-status'
+    status.textContent = '自訂事件訂閱'
 
     const removeBtn = document.createElement('button')
-    removeBtn.className = 'btn btn-danger btn-small'
-    removeBtn.style.padding = '2px 8px'
-    removeBtn.textContent = '移除'
+    removeBtn.className = 'event-delete'
+    removeBtn.type = 'button'
+    removeBtn.textContent = '刪除'
     removeBtn.addEventListener('click', async () => {
       eventMappings = eventMappings.filter((m) => m.id !== mapping.id)
       await saveEventMappings()
       renderEventMappings()
+      renderList()
     })
 
-    row.append(badge, agentName, removeBtn)
+    row.append(badge, agentName, status, removeBtn)
     eventMappingsList.appendChild(row)
   })
 }
@@ -1386,11 +1392,11 @@ function openEventsDialog(): void {
   selectEventRecurrence.value = 'once'
   inputEventInterval.value = '1'
   selectEventIntervalUnit.value = 'minutes'
-  inputEnableHttp.checked = enableHttpInput
   inputMappingEventId.value = ''
   updateRecurrenceFields()
   renderScheduledEvents()
   renderEventMappings()
+  renderHttpAgentsList()
   eventsOverlay.classList.remove('hidden')
 }
 
@@ -1836,6 +1842,7 @@ btnAdd.addEventListener('click', async () => {
     mcpServers: [],
     mcpTools: [],
     memory: false,
+    allowHttp: false,
   }
   items.push(newItem)
   await saveItems()
@@ -1852,9 +1859,33 @@ eventsOverlay.addEventListener('click', (e) => {
   if (e.target === eventsOverlay && eventsOverlayMousedownOnBg) closeEventsDialog()
 })
 selectEventRecurrence.addEventListener('change', updateRecurrenceFields)
-inputEnableHttp.addEventListener('change', () => {
-  void saveEnableHttp(inputEnableHttp.checked)
-})
+function renderHttpAgentsList(): void {
+  if (!httpAgentsList) return
+  httpAgentsList.innerHTML = ''
+  if (items.length === 0) {
+    httpAgentsList.innerHTML = '<span class="skill-placeholder">（尚未建立任何 Agent）</span>'
+    return
+  }
+  items.forEach((item) => {
+    const label = document.createElement('label')
+    label.className = 'http-agent-option'
+
+    const cb = document.createElement('input')
+    cb.type = 'checkbox'
+    cb.checked = !!item.allowHttp
+    cb.addEventListener('change', async () => {
+      item.allowHttp = cb.checked
+      await saveItems()
+      renderList()
+    })
+
+    const text = document.createElement('span')
+    text.textContent = item.name
+
+    label.append(cb, text)
+    httpAgentsList.appendChild(label)
+  })
+}
 
 /** 新增一次性或循環排程事件 */
 btnAddEvent.addEventListener('click', async () => {
@@ -1914,6 +1945,7 @@ btnAddMapping.addEventListener('click', async () => {
   })
   await saveEventMappings()
   renderEventMappings()
+  renderList()
   inputMappingEventId.value = ''
 })
 
@@ -2086,13 +2118,39 @@ btnViewToggle.addEventListener('click', () => {
 })
 
 // ============================================================
+// 主題切換 (Design Variations / Theme Switching)
+// ============================================================
+
+const THEME_KEY = 'listagent_theme'
+const selectTheme = document.getElementById('select-theme') as HTMLSelectElement | null
+
+function applyTheme(theme: string) {
+  document.body.classList.remove('theme-glass-neon', 'theme-cherry-blossom', 'theme-cyberpunk-amber')
+  if (theme && theme !== 'default') {
+    document.body.classList.add(`theme-${theme}`)
+  }
+}
+
+if (selectTheme) {
+  const savedTheme = localStorage.getItem(THEME_KEY) || 'default'
+  selectTheme.value = savedTheme
+  applyTheme(savedTheme)
+
+  selectTheme.addEventListener('change', () => {
+    const selected = selectTheme.value
+    applyTheme(selected)
+    localStorage.setItem(THEME_KEY, selected)
+  })
+}
+
+// ============================================================
 // 初始化
 // ============================================================
 
 ;(async () => {
   // 從 localStorage / Tauri 還原先前儲存的項目
   items = await loadItems()
-  enableHttpInput = await loadEnableHttp()
+  // enableHttpInput initialization removed
   eventMappings = await loadEventMappings()
   scheduledEvents = (await loadScheduledEvents())
     .filter((event) => typeof event.id === 'string'
