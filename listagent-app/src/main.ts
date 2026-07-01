@@ -2125,7 +2125,19 @@ const THEME_KEY = 'listagent_theme'
 const selectTheme = document.getElementById('select-theme') as HTMLSelectElement | null
 
 function applyTheme(theme: string) {
-  document.body.classList.remove('theme-glass-neon', 'theme-cherry-blossom', 'theme-cyberpunk-amber')
+  document.body.classList.remove(
+    'theme-glass-neon',
+    'theme-cherry-blossom',
+    'theme-cyberpunk-amber',
+    'theme-midnight-forest',
+    'theme-ocean-breeze',
+    'theme-solarized-light',
+    'theme-nordic-slate',
+    'theme-sunset-blvd',
+    'theme-royal-velvet',
+    'theme-minimalist-ink',
+    'theme-vaporwave'
+  )
   if (theme && theme !== 'default') {
     document.body.classList.add(`theme-${theme}`)
   }

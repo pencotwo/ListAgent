@@ -1851,3 +1851,773 @@ body.theme-cyberpunk-amber .item-code {
   background: rgba(251, 133, 0, 0.1);
 }
 
+/* 🌲 深夜森林 (Midnight Forest) - 沉靜綠色暗色風 */
+body.theme-midnight-forest {
+  --bg-primary: #06110d;
+  --bg-surface: rgba(18, 43, 34, 0.65);
+  --bg-hover: rgba(255, 255, 255, 0.08);
+  --text-primary: #e6f4ea;
+  --text-secondary: #a3cfbb;
+  --text-muted: #10b981;
+  --border: rgba(255, 255, 255, 0.08);
+  --border-focus: #34d399;
+  --accent: #10b981;
+  --accent-hover: #059669;
+  --accent-light: rgba(16, 185, 129, 0.15);
+  --shadow-sm: 0 4px 6px rgba(0, 0, 0, 0.15);
+  --shadow-md: 0 8px 24px rgba(16, 185, 129, 0.12);
+  --shadow-lg: 0 20px 50px rgba(0, 0, 0, 0.35);
+  --radius: 12px;
+  --radius-sm: 8px;
+  background: radial-gradient(circle at 50% 50%, #102d21 0%, #050d0a 100%) no-repeat fixed;
+  color: var(--text-primary);
+}
+
+body.theme-midnight-forest #app {
+  background: transparent;
+}
+
+body.theme-midnight-forest #toolbar {
+  background: rgba(18, 43, 34, 0.6);
+  backdrop-filter: blur(12px);
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+body.theme-midnight-forest .item-card {
+  background: rgba(18, 43, 34, 0.45);
+  backdrop-filter: blur(10px);
+  border-color: rgba(255, 255, 255, 0.08);
+}
+
+body.theme-midnight-forest .item-card:hover {
+  border-color: var(--border-focus);
+  box-shadow: 0 0 16px rgba(52, 211, 153, 0.15);
+  transform: translateY(-2px);
+}
+
+body.theme-midnight-forest .item-card.selected {
+  border-color: var(--accent);
+  background: rgba(16, 185, 129, 0.15);
+  box-shadow: 0 0 20px rgba(16, 185, 129, 0.25);
+}
+
+body.theme-midnight-forest .message-box {
+  background: linear-gradient(135deg, rgba(18, 43, 34, 0.75) 0%, rgba(8, 20, 16, 0.9) 100%);
+  backdrop-filter: blur(12px);
+  border-top: 2px solid var(--accent);
+}
+
+body.theme-midnight-forest .dialog {
+  background: rgba(18, 43, 34, 0.85);
+  backdrop-filter: blur(20px);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+}
+
+body.theme-midnight-forest .form-input,
+body.theme-midnight-forest .form-textarea,
+body.theme-midnight-forest .form-select,
+body.theme-midnight-forest .model-group,
+body.theme-midnight-forest .tool-group,
+body.theme-midnight-forest .memory-group,
+body.theme-midnight-forest .skill-group,
+body.theme-midnight-forest .event-group,
+body.theme-midnight-forest .mcp-group {
+  background: rgba(5, 13, 10, 0.5);
+  border: 1px solid rgba(255, 255, 255, 0.08);
+}
+
+body.theme-midnight-forest .form-input:focus,
+body.theme-midnight-forest .form-textarea:focus,
+body.theme-midnight-forest .form-select:focus {
+  border-color: var(--border-focus);
+  box-shadow: 0 0 0 3px rgba(52, 211, 153, 0.15);
+}
+
+/* 🌊 海洋微風 (Ocean Breeze) - 舒爽明亮藍色風 */
+body.theme-ocean-breeze {
+  --bg-primary: #f0f9ff;
+  --bg-surface: #ffffff;
+  --bg-hover: #e0f2fe;
+  --text-primary: #0f172a;
+  --text-secondary: #0284c7;
+  --text-muted: #38bdf8;
+  --border: #bae6fd;
+  --border-focus: #0ea5e9;
+  --accent: #0284c7;
+  --accent-hover: #0369a1;
+  --accent-light: rgba(2, 132, 199, 0.08);
+  --shadow-sm: 0 2px 6px rgba(2, 132, 199, 0.04);
+  --shadow-md: 0 6px 16px rgba(2, 132, 199, 0.08);
+  --shadow-lg: 0 16px 40px rgba(2, 132, 199, 0.12);
+  --radius: 14px;
+  --radius-sm: 8px;
+  background: var(--bg-primary);
+  color: var(--text-primary);
+}
+
+body.theme-ocean-breeze #app {
+  background: var(--bg-primary);
+}
+
+body.theme-ocean-breeze #toolbar {
+  background: var(--bg-surface);
+  border-bottom-color: var(--border);
+}
+
+body.theme-ocean-breeze .item-card {
+  background: var(--bg-surface);
+  border-color: var(--border);
+  box-shadow: var(--shadow-sm);
+}
+
+body.theme-ocean-breeze .item-card:hover {
+  border-color: var(--border-focus);
+  background: var(--bg-hover);
+}
+
+body.theme-ocean-breeze .item-card.selected {
+  border-color: var(--accent);
+  background: #e0f2fe;
+  box-shadow: 0 0 0 3px rgba(2, 132, 199, 0.15);
+}
+
+body.theme-ocean-breeze .message-box {
+  background: linear-gradient(135deg, #f0f9ff 0%, #e0f2fe 100%);
+  border-top-color: var(--accent);
+}
+
+body.theme-ocean-breeze .session-history-panel {
+  border-right-color: var(--border);
+}
+
+body.theme-ocean-breeze .session-history-header {
+  color: var(--text-secondary);
+  background: #e0f2fe;
+  border-bottom-color: var(--border);
+}
+
+body.theme-ocean-breeze .session-item:hover {
+  background: rgba(2, 132, 199, 0.08);
+}
+
+body.theme-ocean-breeze .session-item.active {
+  background: rgba(2, 132, 199, 0.15);
+}
+
+body.theme-ocean-breeze .dialog {
+  border-color: var(--border);
+}
+
+body.theme-ocean-breeze .form-input,
+body.theme-ocean-breeze .form-textarea,
+body.theme-ocean-breeze .form-select,
+body.theme-ocean-breeze .model-group,
+body.theme-ocean-breeze .tool-group,
+body.theme-ocean-breeze .memory-group,
+body.theme-ocean-breeze .skill-group,
+body.theme-ocean-breeze .event-group,
+body.theme-ocean-breeze .mcp-group {
+  background: var(--bg-surface);
+  border-color: var(--border);
+}
+
+body.theme-ocean-breeze .btn-primary {
+  background: var(--accent);
+  border-color: var(--accent);
+}
+
+body.theme-ocean-breeze .btn-primary:hover {
+  background: var(--accent-hover);
+  border-color: var(--accent-hover);
+}
+
+/* ☀️ 經典陽光 (Solarized Light) - 懷舊黃銅暖色風 */
+body.theme-solarized-light {
+  --bg-primary: #fdf6e3;
+  --bg-surface: #eee8d5;
+  --bg-hover: #e4dbbf;
+  --text-primary: #002b36;
+  --text-secondary: #586e75;
+  --text-muted: #93a1a1;
+  --border: #d3c7a9;
+  --border-focus: #b58900;
+  --accent: #cb4b16;
+  --accent-hover: #b58900;
+  --accent-light: rgba(203, 75, 22, 0.08);
+  --shadow-sm: 0 2px 4px rgba(0, 0, 0, 0.05);
+  --shadow-md: 0 4px 12px rgba(0, 0, 0, 0.08);
+  --shadow-lg: 0 12px 30px rgba(0, 0, 0, 0.12);
+  --radius: 8px;
+  --radius-sm: 4px;
+  background: var(--bg-primary);
+  color: var(--text-primary);
+}
+
+body.theme-solarized-light #app {
+  background: var(--bg-primary);
+}
+
+body.theme-solarized-light #toolbar {
+  background: var(--bg-surface);
+  border-bottom-color: var(--border);
+}
+
+body.theme-solarized-light .item-card {
+  background: var(--bg-surface);
+  border-color: var(--border);
+  box-shadow: var(--shadow-sm);
+}
+
+body.theme-solarized-light .item-card:hover {
+  border-color: var(--border-focus);
+  background: var(--bg-hover);
+}
+
+body.theme-solarized-light .item-card.selected {
+  border-color: var(--accent);
+  background: #e4dbbf;
+}
+
+body.theme-solarized-light .message-box {
+  background: linear-gradient(135deg, #fdf6e3 0%, #eee8d5 100%);
+  border-top-color: var(--accent);
+}
+
+body.theme-solarized-light .session-history-panel {
+  border-right-color: var(--border);
+}
+
+body.theme-solarized-light .session-history-header {
+  color: var(--text-secondary);
+  background: #e4dbbf;
+  border-bottom-color: var(--border);
+}
+
+body.theme-solarized-light .session-item:hover {
+  background: rgba(203, 75, 22, 0.08);
+}
+
+body.theme-solarized-light .session-item.active {
+  background: rgba(203, 75, 22, 0.15);
+}
+
+body.theme-solarized-light .dialog {
+  border-color: var(--border);
+}
+
+body.theme-solarized-light .form-input,
+body.theme-solarized-light .form-textarea,
+body.theme-solarized-light .form-select,
+body.theme-solarized-light .model-group,
+body.theme-solarized-light .tool-group,
+body.theme-solarized-light .memory-group,
+body.theme-solarized-light .skill-group,
+body.theme-solarized-light .event-group,
+body.theme-solarized-light .mcp-group {
+  background: var(--bg-surface);
+  border-color: var(--border);
+}
+
+body.theme-solarized-light .btn-primary {
+  background: var(--accent);
+  border-color: var(--accent);
+  color: #fff;
+}
+
+body.theme-solarized-light .btn-primary:hover {
+  background: var(--accent-hover);
+  border-color: var(--accent-hover);
+}
+
+/* ❄️ 北歐極簡 (Nordic Slate) - 現代冰冷冰藍風 */
+body.theme-nordic-slate {
+  --bg-primary: #181b22;
+  --bg-surface: #20242f;
+  --bg-hover: #2b303f;
+  --text-primary: #e2e8f0;
+  --text-secondary: #7dd3fc;
+  --text-muted: #64748b;
+  --border: #334155;
+  --border-focus: #38bdf8;
+  --accent: #38bdf8;
+  --accent-hover: #0ea5e9;
+  --accent-light: rgba(56, 189, 248, 0.12);
+  --shadow-sm: 0 1px 3px rgba(0, 0, 0, 0.2);
+  --shadow-md: 0 4px 12px rgba(0, 0, 0, 0.3);
+  --shadow-lg: 0 12px 36px rgba(0, 0, 0, 0.45);
+  --radius: 6px;
+  --radius-sm: 4px;
+  background: var(--bg-primary);
+  color: var(--text-primary);
+}
+
+body.theme-nordic-slate #app {
+  background: var(--bg-primary);
+}
+
+body.theme-nordic-slate #toolbar {
+  background: var(--bg-surface);
+  border-bottom: 1px solid var(--border);
+}
+
+body.theme-nordic-slate .item-card {
+  background: var(--bg-surface);
+  border-color: var(--border);
+}
+
+body.theme-nordic-slate .item-card:hover {
+  border-color: var(--border-focus);
+  background: var(--bg-hover);
+}
+
+body.theme-nordic-slate .item-card.selected {
+  border-color: var(--accent);
+  background: rgba(56, 189, 248, 0.1);
+  box-shadow: 0 0 8px rgba(56, 189, 248, 0.2);
+}
+
+body.theme-nordic-slate .message-box {
+  background: #111318;
+  border-top: 2px solid var(--accent);
+}
+
+body.theme-nordic-slate .session-history-panel {
+  border-right-color: var(--border);
+}
+
+body.theme-nordic-slate .session-history-header {
+  color: var(--text-secondary);
+  background: rgba(56, 189, 248, 0.08);
+}
+
+body.theme-nordic-slate .session-item:hover {
+  background: rgba(255, 255, 255, 0.05);
+}
+
+body.theme-nordic-slate .session-item.active {
+  background: rgba(56, 189, 248, 0.15);
+}
+
+body.theme-nordic-slate .dialog {
+  border-color: var(--border-focus);
+}
+
+body.theme-nordic-slate .form-input,
+body.theme-nordic-slate .form-textarea,
+body.theme-nordic-slate .form-select,
+body.theme-nordic-slate .model-group,
+body.theme-nordic-slate .tool-group,
+body.theme-nordic-slate .memory-group,
+body.theme-nordic-slate .skill-group,
+body.theme-nordic-slate .event-group,
+body.theme-nordic-slate .mcp-group {
+  background: #111318;
+  border-color: var(--border);
+}
+
+body.theme-nordic-slate .btn-primary {
+  background: var(--accent);
+  color: #0f172a;
+  font-weight: 600;
+}
+
+body.theme-nordic-slate .btn-primary:hover {
+  background: var(--accent-hover);
+  color: #fff;
+}
+
+/* 🌇 落日大道 (Sunset Boulevard) - 暗紫色霞光風 */
+body.theme-sunset-blvd {
+  --bg-primary: #0e051c;
+  --bg-surface: rgba(43, 20, 71, 0.6);
+  --bg-hover: rgba(255, 255, 255, 0.08);
+  --text-primary: #ffedd5;
+  --text-secondary: #fed7aa;
+  --text-muted: #f97316;
+  --border: rgba(249, 115, 22, 0.15);
+  --border-focus: #facc15;
+  --accent: #f97316;
+  --accent-hover: #facc15;
+  --accent-light: rgba(249, 115, 22, 0.15);
+  --shadow-sm: 0 4px 6px rgba(0, 0, 0, 0.2);
+  --shadow-md: 0 8px 24px rgba(249, 115, 22, 0.18);
+  --shadow-lg: 0 20px 50px rgba(0, 0, 0, 0.4);
+  --radius: 12px;
+  --radius-sm: 8px;
+  background: radial-gradient(circle at 50% 50%, #25123e 0%, #0e051c 100%) no-repeat fixed;
+  color: var(--text-primary);
+}
+
+body.theme-sunset-blvd #app {
+  background: transparent;
+}
+
+body.theme-sunset-blvd #toolbar {
+  background: rgba(43, 20, 71, 0.65);
+  backdrop-filter: blur(12px);
+  border-bottom: 1px solid rgba(249, 115, 22, 0.2);
+}
+
+body.theme-sunset-blvd .item-card {
+  background: rgba(43, 20, 71, 0.45);
+  backdrop-filter: blur(10px);
+  border-color: rgba(249, 115, 22, 0.18);
+}
+
+body.theme-sunset-blvd .item-card:hover {
+  border-color: var(--border-focus);
+  box-shadow: 0 0 16px rgba(249, 115, 22, 0.25);
+  transform: translateY(-2px);
+}
+
+body.theme-sunset-blvd .item-card.selected {
+  border-color: var(--accent);
+  background: rgba(249, 115, 22, 0.2);
+  box-shadow: 0 0 20px rgba(249, 115, 22, 0.3);
+}
+
+body.theme-sunset-blvd .message-box {
+  background: linear-gradient(135deg, rgba(43, 20, 71, 0.8) 0%, rgba(20, 7, 36, 0.95) 100%);
+  backdrop-filter: blur(12px);
+  border-top: 2px solid var(--accent);
+}
+
+body.theme-sunset-blvd .dialog {
+  background: rgba(43, 20, 71, 0.9);
+  backdrop-filter: blur(20px);
+  border: 1px solid rgba(249, 115, 22, 0.25);
+}
+
+body.theme-sunset-blvd .form-input,
+body.theme-sunset-blvd .form-textarea,
+body.theme-sunset-blvd .form-select,
+body.theme-sunset-blvd .model-group,
+body.theme-sunset-blvd .tool-group,
+body.theme-sunset-blvd .memory-group,
+body.theme-sunset-blvd .skill-group,
+body.theme-sunset-blvd .event-group,
+body.theme-sunset-blvd .mcp-group {
+  background: rgba(14, 5, 28, 0.5);
+  border: 1px solid rgba(249, 115, 22, 0.18);
+}
+
+body.theme-sunset-blvd .form-input:focus,
+body.theme-sunset-blvd .form-textarea:focus,
+body.theme-sunset-blvd .form-select:focus {
+  border-color: var(--border-focus);
+  box-shadow: 0 0 0 3px rgba(250, 204, 21, 0.2);
+}
+
+body.theme-sunset-blvd .btn-primary {
+  background: linear-gradient(135deg, #f97316 0%, #ea580c 100%);
+  border: none;
+  box-shadow: 0 4px 12px rgba(249, 115, 22, 0.3);
+  color: #fff;
+}
+
+body.theme-sunset-blvd .btn-primary:hover {
+  background: linear-gradient(135deg, #fb923c 0%, #f97316 100%);
+}
+
+/* 👑 皇家絲絨 (Royal Velvet) - 貴族深紫鍍金風 */
+body.theme-royal-velvet {
+  --bg-primary: #0a0312;
+  --bg-surface: #190c28;
+  --bg-hover: #29153f;
+  --text-primary: #fef08a;
+  --text-secondary: #c084fc;
+  --text-muted: #fbbf24;
+  --border: #3b1c61;
+  --border-focus: #fbbf24;
+  --accent: #fbbf24;
+  --accent-hover: #f59e0b;
+  --accent-light: rgba(251, 191, 36, 0.15);
+  --shadow-sm: 0 2px 4px rgba(0, 0, 0, 0.3);
+  --shadow-md: 0 6px 18px rgba(251, 191, 36, 0.1);
+  --shadow-lg: 0 16px 40px rgba(0, 0, 0, 0.5);
+  --radius: 10px;
+  --radius-sm: 6px;
+  background: var(--bg-primary);
+  color: var(--text-primary);
+}
+
+body.theme-royal-velvet #app {
+  background: var(--bg-primary);
+}
+
+body.theme-royal-velvet #toolbar {
+  background: var(--bg-surface);
+  border-bottom: 2px solid var(--border);
+}
+
+body.theme-royal-velvet .item-card {
+  background: var(--bg-surface);
+  border-color: var(--border);
+}
+
+body.theme-royal-velvet .item-card:hover {
+  border-color: var(--border-focus);
+  background: var(--bg-hover);
+}
+
+body.theme-royal-velvet .item-card.selected {
+  border-color: var(--accent);
+  background: rgba(251, 191, 36, 0.08);
+  box-shadow: 0 0 10px rgba(251, 191, 36, 0.15);
+}
+
+body.theme-royal-velvet .message-box {
+  background: #0f051c;
+  border-top: 3px solid var(--accent);
+}
+
+body.theme-royal-velvet .session-history-panel {
+  border-right-color: var(--border);
+}
+
+body.theme-royal-velvet .session-history-header {
+  color: var(--text-primary);
+  background: rgba(251, 191, 36, 0.1);
+}
+
+body.theme-royal-velvet .session-item:hover {
+  background: rgba(255, 255, 255, 0.04);
+}
+
+body.theme-royal-velvet .session-item.active {
+  background: rgba(251, 191, 36, 0.15);
+}
+
+body.theme-royal-velvet .dialog {
+  border-color: var(--border-focus);
+}
+
+body.theme-royal-velvet .form-input,
+body.theme-royal-velvet .form-textarea,
+body.theme-royal-velvet .form-select,
+body.theme-royal-velvet .model-group,
+body.theme-royal-velvet .tool-group,
+body.theme-royal-velvet .memory-group,
+body.theme-royal-velvet .skill-group,
+body.theme-royal-velvet .event-group,
+body.theme-royal-velvet .mcp-group {
+  background: #0a0312;
+  border-color: var(--border);
+  color: #fff;
+}
+
+body.theme-royal-velvet .btn-primary {
+  background: var(--accent);
+  color: #000;
+  font-weight: 700;
+}
+
+body.theme-royal-velvet .btn-primary:hover {
+  background: var(--accent-hover);
+}
+
+/* 🖋️ 水墨黑白 (Minimalist Ink) - 極簡黑白水墨紙張風 */
+body.theme-minimalist-ink {
+  --bg-primary: #fafafa;
+  --bg-surface: #ffffff;
+  --bg-hover: #eaeaea;
+  --text-primary: #111111;
+  --text-secondary: #555555;
+  --text-muted: #777777;
+  --border: #111111;
+  --border-focus: #000000;
+  --accent: #000000;
+  --accent-hover: #222222;
+  --accent-light: rgba(0, 0, 0, 0.05);
+  --shadow-sm: none;
+  --shadow-md: none;
+  --shadow-lg: none;
+  --radius: 0px;
+  --radius-sm: 0px;
+  background: var(--bg-primary);
+  color: var(--text-primary);
+  border: 1px solid var(--border);
+}
+
+body.theme-minimalist-ink #app {
+  background: var(--bg-primary);
+}
+
+body.theme-minimalist-ink #toolbar {
+  background: var(--bg-surface);
+  border-bottom: 2px solid var(--border);
+}
+
+body.theme-minimalist-ink .item-card {
+  background: var(--bg-surface);
+  border: 1px solid var(--border);
+}
+
+body.theme-minimalist-ink .item-card:hover {
+  background: var(--bg-hover);
+}
+
+body.theme-minimalist-ink .item-card.selected {
+  border: 2px solid var(--accent);
+  background: #eaeaea;
+}
+
+body.theme-minimalist-ink .message-box {
+  background: #ffffff;
+  border-top: 2px solid var(--accent);
+}
+
+body.theme-minimalist-ink .session-history-panel {
+  border-right: 2px solid var(--border);
+}
+
+body.theme-minimalist-ink .session-history-header {
+  color: #000;
+  background: #eaeaea;
+  border-bottom: 2px solid var(--border);
+  font-weight: 700;
+}
+
+body.theme-minimalist-ink .session-item:hover {
+  background: #eee;
+}
+
+body.theme-minimalist-ink .session-item.active {
+  background: #ddd;
+  font-weight: 700;
+}
+
+body.theme-minimalist-ink .dialog {
+  border: 2px solid var(--border);
+}
+
+body.theme-minimalist-ink .form-input,
+body.theme-minimalist-ink .form-textarea,
+body.theme-minimalist-ink .form-select,
+body.theme-minimalist-ink .model-group,
+body.theme-minimalist-ink .tool-group,
+body.theme-minimalist-ink .memory-group,
+body.theme-minimalist-ink .skill-group,
+body.theme-minimalist-ink .event-group,
+body.theme-minimalist-ink .mcp-group {
+  background: #ffffff;
+  border: 1px solid var(--border);
+}
+
+body.theme-minimalist-ink .btn-primary {
+  background: #000000;
+  color: #ffffff;
+  font-weight: 700;
+  border-radius: 0;
+}
+
+body.theme-minimalist-ink .btn-primary:hover {
+  background: #333333;
+}
+
+/* 💾 蒸汽霓虹 (Vaporwave) - 電子蒸汽波迷幻風 */
+body.theme-vaporwave {
+  --bg-primary: #12092e;
+  --bg-surface: #1c0d45;
+  --bg-hover: #291366;
+  --text-primary: #00f2fe;
+  --text-secondary: #ff007f;
+  --text-muted: #bd00ff;
+  --border: #2e1866;
+  --border-focus: #ff007f;
+  --accent: #ff007f;
+  --accent-hover: #00f2fe;
+  --accent-light: rgba(255, 0, 127, 0.15);
+  --shadow-sm: 0 0 6px rgba(255, 0, 127, 0.2);
+  --shadow-md: 0 0 12px rgba(255, 0, 127, 0.35);
+  --shadow-lg: 0 0 30px rgba(255, 0, 127, 0.5);
+  --radius: 8px;
+  --radius-sm: 4px;
+  background: radial-gradient(circle at 50% 50%, #201050 0%, #0d0622 100%) no-repeat fixed;
+  color: var(--text-primary);
+}
+
+body.theme-vaporwave #app {
+  background: transparent;
+}
+
+body.theme-vaporwave #toolbar {
+  background: rgba(28, 13, 69, 0.7);
+  backdrop-filter: blur(12px);
+  border-bottom: 2px solid var(--border);
+}
+
+body.theme-vaporwave .item-card {
+  background: rgba(28, 13, 69, 0.5);
+  border-color: var(--border);
+}
+
+body.theme-vaporwave .item-card:hover {
+  border-color: var(--border-focus);
+  box-shadow: 0 0 12px rgba(255, 0, 127, 0.3);
+}
+
+body.theme-vaporwave .item-card.selected {
+  border-color: var(--text-primary);
+  background: rgba(255, 0, 127, 0.15);
+  box-shadow: 0 0 18px rgba(0, 242, 254, 0.35);
+}
+
+body.theme-vaporwave .message-box {
+  background: linear-gradient(135deg, rgba(28, 13, 69, 0.8) 0%, rgba(13, 6, 34, 0.95) 100%);
+  border-top: 3px solid var(--accent);
+}
+
+body.theme-vaporwave .session-history-panel {
+  border-right-color: var(--border);
+}
+
+body.theme-vaporwave .session-history-header {
+  color: var(--text-primary);
+  background: rgba(255, 0, 127, 0.15);
+  border-bottom: 2px solid var(--border);
+}
+
+body.theme-vaporwave .session-item:hover {
+  background: rgba(255, 255, 255, 0.05);
+}
+
+body.theme-vaporwave .session-item.active {
+  background: rgba(255, 0, 127, 0.2);
+  border: 1px solid var(--accent);
+}
+
+body.theme-vaporwave .dialog {
+  background: rgba(28, 13, 69, 0.9);
+  backdrop-filter: blur(20px);
+  border: 2px solid var(--border-focus);
+}
+
+body.theme-vaporwave .form-input,
+body.theme-vaporwave .form-textarea,
+body.theme-vaporwave .form-select,
+body.theme-vaporwave .model-group,
+body.theme-vaporwave .tool-group,
+body.theme-vaporwave .memory-group,
+body.theme-vaporwave .skill-group,
+body.theme-vaporwave .event-group,
+body.theme-vaporwave .mcp-group {
+  background: #0d0622;
+  border-color: var(--border);
+  color: #fff;
+}
+
+body.theme-vaporwave .btn-primary {
+  background: var(--accent);
+  color: #fff;
+  font-weight: 700;
+  text-shadow: 0 0 4px rgba(255, 255, 255, 0.5);
+}
+
+body.theme-vaporwave .btn-primary:hover {
+  background: var(--accent-hover);
+  color: #000;
+  box-shadow: 0 0 10px var(--accent-hover);
+}
+
+
