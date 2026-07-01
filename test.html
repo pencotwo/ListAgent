@@ -1,0 +1,450 @@
+<!doctype html>
+<html lang="zh-TW">
+<head>
+  <meta charset="UTF-8" />
+  <title>ListAgent HTTP Server 測試</title>
+  <style>
+    :root {
+      --bg: #0f1117;
+      --surface: #1a1d27;
+      --border: #2e3344;
+      --accent: #818cf8;
+      --accent-light: rgba(129, 140, 248, 0.1);
+      --text: #e5e7eb;
+      --muted: #6b7280;
+      --success: #86efac;
+      --error: #fca5a5;
+      --warn: #fde68a;
+      --mono: 'Cascadia Code', 'Fira Code', Consolas, monospace;
+      --sans: 'Segoe UI', system-ui, sans-serif;
+    }
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      background: var(--bg);
+      color: var(--text);
+      font-family: var(--sans);
+      font-size: 14px;
+      min-height: 100vh;
+      padding: 24px;
+    }
+    h1 { font-size: 20px; font-weight: 700; color: var(--accent); margin-bottom: 4px; }
+    .subtitle { color: var(--muted); font-size: 13px; margin-bottom: 24px; }
+    .server-addr { font-family: var(--mono); color: var(--accent); }
+    .card {
+      background: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 20px;
+      margin-bottom: 16px;
+    }
+    .card-title {
+      font-size: 11px; font-weight: 700; text-transform: uppercase;
+      letter-spacing: 0.5px; color: var(--muted); margin-bottom: 14px;
+    }
+    .row { display: flex; gap: 10px; align-items: flex-end; flex-wrap: wrap; margin-bottom: 10px; }
+    .field { display: flex; flex-direction: column; gap: 5px; flex: 1; min-width: 150px; }
+    .field label { font-size: 11px; font-weight: 600; color: var(--muted); text-transform: uppercase; letter-spacing: 0.4px; }
+    input, textarea {
+      background: var(--bg); border: 1px solid var(--border); border-radius: 6px;
+      color: var(--text); font-family: var(--sans); font-size: 13px;
+      padding: 8px 10px; outline: none; width: 100%; transition: border-color 0.15s;
+    }
+    input:focus, textarea:focus { border-color: var(--accent); }
+    textarea { font-family: var(--mono); font-size: 12px; resize: vertical; min-height: 72px; }
+    .btn {
+      padding: 8px 18px; border-radius: 6px; border: none;
+      font-family: var(--sans); font-size: 13px; font-weight: 600;
+      cursor: pointer; transition: all 0.15s; white-space: nowrap;
+    }
+    .btn-primary { background: var(--accent); color: #fff; }
+    .btn-primary:hover { background: #6366f1; }
+    .btn-secondary { background: transparent; color: var(--muted); border: 1px solid var(--border); }
+    .btn-secondary:hover { background: rgba(255,255,255,0.05); color: var(--text); }
+    .url-label { font-size: 11px; color: var(--muted); margin-bottom: 4px; font-weight: 600; text-transform: uppercase; }
+    .url-display {
+      font-family: var(--mono); font-size: 12px; color: var(--accent);
+      background: var(--bg); border: 1px solid var(--border); border-radius: 6px;
+      padding: 8px 10px; word-break: break-all; margin-bottom: 10px; min-height: 36px;
+    }
+    .response-box {
+      background: var(--bg); border: 1px solid var(--border); border-radius: 6px;
+      padding: 12px; font-family: var(--mono); font-size: 12px; line-height: 1.6;
+      white-space: pre-wrap; word-break: break-all; min-height: 56px; color: var(--muted);
+    }
+    .response-box.ok  { color: var(--success); border-color: rgba(134,239,172,0.3); }
+    .response-box.err { color: var(--error);   border-color: rgba(252,165,165,0.3); }
+    .response-box.warn{ color: var(--warn);    border-color: rgba(253,230,138,0.3); }
+    .res-header { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; font-size: 12px; color: var(--muted); min-height: 20px; }
+    .badge {
+      font-size: 11px; font-weight: 700; padding: 1px 7px; border-radius: 10px;
+      font-family: var(--mono);
+    }
+    .badge-ok  { background: rgba(134,239,172,0.15); color: var(--success); }
+    .badge-err { background: rgba(252,165,165,0.15); color: var(--error); }
+    .badge-net { background: rgba(253,230,138,0.15); color: var(--warn); }
+    .divider { border: none; border-top: 1px solid var(--border); margin: 14px 0; }
+    .tabs { display: flex; gap: 4px; margin-bottom: 14px; }
+    .tab {
+      padding: 6px 14px; border-radius: 6px; border: 1px solid var(--border);
+      background: transparent; color: var(--muted); font-size: 12px; font-weight: 600;
+      cursor: pointer; transition: all 0.15s;
+    }
+    .tab.active { background: var(--accent-light); border-color: var(--accent); color: var(--accent); }
+    .panel { display: none; }
+    .panel.active { display: block; }
+    #get-message { font-family: var(--sans); font-size: 13px; min-height: 56px; }
+    .card-title-row { display: flex; align-items: center; justify-content: space-between; margin-bottom: 14px; }
+    .card-title-row .card-title { margin-bottom: 0; }
+    .btn-ghost {
+      padding: 3px 10px; border-radius: 5px; border: 1px solid var(--border);
+      background: transparent; color: var(--muted); font-size: 11px; font-weight: 600;
+      cursor: pointer; transition: all 0.15s;
+    }
+    .btn-ghost:hover { background: rgba(255,255,255,0.05); color: var(--text); }
+    .history-list { display: flex; flex-direction: column; gap: 4px; }
+    .history-item {
+      display: flex; align-items: center; gap: 8px; padding: 6px 8px;
+      border-radius: 5px; background: var(--bg); font-size: 11px;
+      font-family: var(--mono); cursor: pointer; border: 1px solid transparent;
+      transition: border-color 0.15s;
+    }
+    .history-item:hover { border-color: var(--border); }
+    .h-time { color: var(--muted); flex-shrink: 0; }
+    .h-method {
+      color: var(--accent); padding: 1px 5px; background: var(--accent-light);
+      border-radius: 3px; flex-shrink: 0; font-size: 10px;
+    }
+    .h-url { color: var(--accent); flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+  </style>
+</head>
+<body>
+  <h1>🛜 ListAgent HTTP Server 測試</h1>
+  <p class="subtitle">伺服器位址：<span class="server-addr">http://127.0.0.1:37123</span></p>
+
+  <!-- Health Check -->
+  <div class="card">
+    <div class="card-title">Health Check</div>
+    <div class="row">
+      <button class="btn btn-primary" id="btn-health">GET /health</button>
+    </div>
+    <div class="res-header" id="health-header"></div>
+    <div class="response-box" id="health-res">（尚未送出）</div>
+  </div>
+
+  <!-- Send Input -->
+  <div class="card">
+    <div class="card-title">送出 Input 給 Agent</div>
+    <div class="tabs">
+      <button class="tab active" id="tab-get">GET</button>
+      <button class="tab" id="tab-post">POST</button>
+    </div>
+
+    <!-- GET Panel -->
+    <div id="panel-get" class="panel active">
+      <div class="row">
+        <div class="field">
+          <label>agent（項目名稱）</label>
+          <input id="get-agent" type="text" placeholder="例如：項目 1" />
+        </div>
+        <div class="field">
+          <label>arg1</label>
+          <input id="get-arg1" type="text" placeholder="（選填）" />
+        </div>
+        <div class="field">
+          <label>arg2</label>
+          <input id="get-arg2" type="text" placeholder="（選填）" />
+        </div>
+        <div class="field">
+          <label>arg3</label>
+          <input id="get-arg3" type="text" placeholder="（選填）" />
+        </div>
+      </div>
+      <div class="row">
+        <div class="field" style="flex:3">
+          <label>message</label>
+          <textarea id="get-message" placeholder="（選填，可多行）"></textarea>
+        </div>
+      </div>
+      <div class="row">
+        <div class="field" style="flex:3">
+          <label>額外自訂參數（key=value，一行一個）</label>
+          <textarea id="get-extra" placeholder="tag=first&#10;category=news"></textarea>
+        </div>
+      </div>
+      <div class="url-label">預覽 URL</div>
+      <div id="get-url-preview" class="url-display">（填入 agent 名稱後預覽）</div>
+      <div class="row">
+        <button class="btn btn-primary" id="btn-get-send">送出 GET</button>
+        <button class="btn btn-secondary" id="btn-get-copy">複製 URL</button>
+        <button class="btn btn-secondary" id="btn-get-open">瀏覽器開啟</button>
+      </div>
+    </div>
+
+    <!-- POST Panel -->
+    <div id="panel-post" class="panel">
+      <div class="row">
+        <div class="field">
+          <label>agent（項目名稱）</label>
+          <input id="post-agent" type="text" placeholder="例如：項目 1" />
+        </div>
+      </div>
+      <div class="row">
+        <div class="field">
+          <label>parameters（JSON 物件）</label>
+          <textarea id="post-body" placeholder='{"arg1": "hello", "arg2": "world"}'></textarea>
+        </div>
+      </div>
+      <div class="row">
+        <button class="btn btn-primary" id="btn-post-send">送出 POST</button>
+        <button class="btn btn-secondary" id="btn-post-example">填入範例</button>
+      </div>
+    </div>
+
+    <hr class="divider" />
+    <div class="res-header" id="input-header"></div>
+    <div class="response-box" id="input-res">（尚未送出）</div>
+  </div>
+
+  <!-- History -->
+  <div class="card">
+    <div class="card-title-row">
+      <div class="card-title">請求歷史</div>
+      <button class="btn-ghost" id="btn-clear-history">清除</button>
+    </div>
+    <div class="history-list" id="history-list">
+      <span style="color:var(--muted);font-size:12px">尚無歷史</span>
+    </div>
+  </div>
+
+<script>
+const BASE = 'http://127.0.0.1:37123'
+const HISTORY_KEY = 'listagent_test_history'
+
+// 從 localStorage 載入歷史
+const reqHistory = (function() {
+  try {
+    const raw = localStorage.getItem(HISTORY_KEY)
+    if (raw) return JSON.parse(raw)
+  } catch (_) {}
+  return []
+}())
+
+// ── 工具函式 ──────────────────────────────────────────────────
+
+function buildGetUrl() {
+  const agent = document.getElementById('get-agent').value.trim()
+  if (!agent) return null
+  const p = new URLSearchParams()
+  p.set('agent', agent)
+  const a1 = document.getElementById('get-arg1').value.trim()
+  const a2 = document.getElementById('get-arg2').value.trim()
+  const a3 = document.getElementById('get-arg3').value.trim()
+  if (a1) p.set('arg1', a1)
+  if (a2) p.set('arg2', a2)
+  if (a3) p.set('arg3', a3)
+  const msg = document.getElementById('get-message').value.trim()
+  if (msg) p.set('message', msg)
+  document.getElementById('get-extra').value.trim().split('\n').forEach(function(line) {
+    const eq = line.indexOf('=')
+    if (eq > 0) {
+      const k = line.slice(0, eq).trim()
+      const v = line.slice(eq + 1).trim()
+      if (k) p.append(k, v)
+    }
+  })
+  return BASE + '/input?' + p.toString()
+}
+
+function updateUrlPreview() {
+  const url = buildGetUrl()
+  document.getElementById('get-url-preview').textContent = url || '（填入 agent 名稱後預覽）'
+}
+
+function setResponse(headerId, bodyId, status, text) {
+  const headerEl = document.getElementById(headerId)
+  const bodyEl   = document.getElementById(bodyId)
+  const isOk = status >= 200 && status < 300
+  const badge = document.createElement('span')
+  badge.className = 'badge ' + (isOk ? 'badge-ok' : 'badge-err')
+  badge.textContent = status
+  headerEl.innerHTML = ''
+  headerEl.appendChild(badge)
+  headerEl.appendChild(document.createTextNode(' ' + new Date().toLocaleTimeString('zh-TW', { hour12: false })))
+  bodyEl.className = 'response-box ' + (isOk ? 'ok' : 'err')
+  try {
+    bodyEl.textContent = JSON.stringify(JSON.parse(text), null, 2)
+  } catch (_) {
+    bodyEl.textContent = text
+  }
+}
+
+function setNetError(headerId, bodyId, err) {
+  const headerEl = document.getElementById(headerId)
+  const bodyEl   = document.getElementById(bodyId)
+  headerEl.innerHTML = '<span class="badge badge-net">NET ERR</span> ' +
+    new Date().toLocaleTimeString('zh-TW', { hour12: false })
+  bodyEl.className = 'response-box warn'
+  bodyEl.textContent = '網路錯誤：' + err.message + '\n（確認 ListAgent App 已開啟）'
+}
+
+function saveHistory() {
+  try { localStorage.setItem(HISTORY_KEY, JSON.stringify(reqHistory)) } catch (_) {}
+}
+
+function addHistory(method, url) {
+  reqHistory.unshift({ method: method, url: url, time: new Date().toLocaleTimeString('zh-TW', { hour12: false }) })
+  if (reqHistory.length > 50) reqHistory.pop()
+  saveHistory()
+  renderHistory()
+}
+
+function renderHistory() {
+  const el = document.getElementById('history-list')
+  if (reqHistory.length === 0) {
+    el.innerHTML = '<span style="color:var(--muted);font-size:12px">尚無歷史</span>'
+    return
+  }
+  el.innerHTML = ''
+  reqHistory.forEach(function(h, i) {
+    const div = document.createElement('div')
+    div.className = 'history-item'
+    div.innerHTML =
+      '<span class="h-time">' + h.time + '</span>' +
+      '<span class="h-method">' + h.method + '</span>' +
+      '<span class="h-url" title="' + h.url + '">' + h.url + '</span>'
+    div.addEventListener('click', function() { reuseHistory(i) })
+    el.appendChild(div)
+  })
+}
+
+function reuseHistory(i) {
+  const h = reqHistory[i]
+  if (!h) return
+  if (h.method === 'GET') {
+    try {
+      const url = new URL(h.url)
+      document.getElementById('get-agent').value   = url.searchParams.get('agent')   || ''
+      document.getElementById('get-arg1').value    = url.searchParams.get('arg1')    || ''
+      document.getElementById('get-arg2').value    = url.searchParams.get('arg2')    || ''
+      document.getElementById('get-arg3').value    = url.searchParams.get('arg3')    || ''
+      document.getElementById('get-message').value = url.searchParams.get('message') || ''
+      const extra = []
+      url.searchParams.forEach(function(v, k) {
+        if (!['agent','arg1','arg2','arg3','message'].includes(k)) extra.push(k + '=' + v)
+      })
+      document.getElementById('get-extra').value = extra.join('\n')
+      updateUrlPreview()
+    } catch (_) {}
+    switchTab('get')
+  }
+}
+
+function switchTab(name) {
+  document.getElementById('tab-get').classList.toggle('active', name === 'get')
+  document.getElementById('tab-post').classList.toggle('active', name === 'post')
+  document.getElementById('panel-get').classList.toggle('active', name === 'get')
+  document.getElementById('panel-post').classList.toggle('active', name === 'post')
+}
+
+// ── 動作 ─────────────────────────────────────────────────────
+
+async function doHealth() {
+  const bodyEl = document.getElementById('health-res')
+  bodyEl.className = 'response-box'
+  bodyEl.textContent = '送出中…'
+  try {
+    const res  = await fetch(BASE + '/health')
+    const text = await res.text()
+    setResponse('health-header', 'health-res', res.status, text)
+    addHistory('GET', BASE + '/health')
+  } catch (err) {
+    setNetError('health-header', 'health-res', err)
+  }
+}
+
+async function doGet() {
+  const url = buildGetUrl()
+  if (!url) { alert('請填入 agent 名稱'); return }
+  const bodyEl = document.getElementById('input-res')
+  bodyEl.className = 'response-box'
+  bodyEl.textContent = '送出中…'
+  try {
+    const res  = await fetch(url)
+    const text = await res.text()
+    setResponse('input-header', 'input-res', res.status, text)
+    addHistory('GET', url)
+  } catch (err) {
+    setNetError('input-header', 'input-res', err)
+  }
+}
+
+async function doPost() {
+  const agent = document.getElementById('post-agent').value.trim()
+  if (!agent) { alert('請填入 agent 名稱'); return }
+  const rawBody = document.getElementById('post-body').value.trim()
+  let parameters
+  try {
+    parameters = rawBody ? JSON.parse(rawBody) : {}
+  } catch (_) {
+    alert('parameters 不是有效的 JSON')
+    return
+  }
+  const bodyEl = document.getElementById('input-res')
+  bodyEl.className = 'response-box'
+  bodyEl.textContent = '送出中…'
+  const payload = JSON.stringify({ agent: agent, parameters: parameters })
+  try {
+    const res  = await fetch(BASE + '/input', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: payload,
+    })
+    const text = await res.text()
+    setResponse('input-header', 'input-res', res.status, text)
+    addHistory('POST', BASE + '/input')
+  } catch (err) {
+    setNetError('input-header', 'input-res', err)
+  }
+}
+
+// ── 事件繫結 ──────────────────────────────────────────────────
+
+document.getElementById('btn-health').addEventListener('click', doHealth)
+document.getElementById('btn-get-send').addEventListener('click', doGet)
+document.getElementById('btn-post-send').addEventListener('click', doPost)
+
+document.getElementById('tab-get').addEventListener('click', function() { switchTab('get') })
+document.getElementById('tab-post').addEventListener('click', function() { switchTab('post') })
+
+document.getElementById('btn-get-copy').addEventListener('click', function() {
+  const url = buildGetUrl()
+  if (!url) { alert('請填入 agent 名稱'); return }
+  navigator.clipboard.writeText(url).then(function() { alert('已複製！') })
+})
+
+document.getElementById('btn-get-open').addEventListener('click', function() {
+  const url = buildGetUrl()
+  if (!url) { alert('請填入 agent 名稱'); return }
+  window.open(url, '_blank')
+})
+
+document.getElementById('btn-post-example').addEventListener('click', function() {
+  document.getElementById('post-agent').value = '項目 1'
+  document.getElementById('post-body').value = JSON.stringify({ arg1: '你好', arg2: 'world' }, null, 2)
+})
+
+document.getElementById('btn-clear-history').addEventListener('click', function() {
+  reqHistory.length = 0
+  saveHistory()
+  renderHistory()
+})
+
+;['get-agent','get-arg1','get-arg2','get-arg3','get-message','get-extra'].forEach(function(id) {
+  document.getElementById(id).addEventListener('input', updateUrlPreview)
+})
+
+// 頁面載入時渲染已儲存的歷史
+renderHistory()
+</script>
+</body>
+</html>

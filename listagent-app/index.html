@@ -1,0 +1,229 @@
+<!doctype html>
+<html lang="zh-TW">
+  <head>
+    <meta charset="UTF-8" />
+    <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>ListAgent</title>
+  </head>
+  <body>
+    <div id="app">
+      <!-- 頂部工具列 -->
+      <header id="toolbar">
+        <h1 id="app-title">📋 ListAgent</h1>
+        <div class="toolbar-actions">
+          <button id="btn-events" title="事件設定" aria-label="事件設定">⏰</button>
+          <button id="btn-add" title="新增項目">＋</button>
+        </div>
+      </header>
+
+      <!-- 列表容器 -->
+      <main id="list-container">
+        <!-- 動態渲染的項目會放在這裡 -->
+      </main>
+
+      <!-- 空狀態提示 -->
+      <div id="empty-state" class="empty-state">
+        <span class="empty-icon">📭</span>
+        <p>尚未有任何項目</p>
+        <p class="empty-hint">點擊上方「＋」按鈕新增第一個項目</p>
+      </div>
+
+      <!-- 分隔條：拖曳調整上方列表與下方訊息框的高度 -->
+      <div id="splitter" class="splitter"></div>
+
+      <!-- 訊息框：左邊歷史 Session，右邊執行過程 -->
+      <div id="message-box" class="message-box">
+        <!-- 左：歷史 Session 清單 -->
+        <div id="session-history-panel" class="session-history-panel">
+          <div class="session-history-header">歷史 Session</div>
+          <div id="session-list" class="session-list">
+            <span class="session-placeholder">← 選取項目以查看歷史</span>
+          </div>
+        </div>
+        <!-- 垂直分隔條 -->
+        <div id="vsplitter" class="vsplitter"></div>
+        <!-- 右：執行過程 -->
+        <div id="execution-panel" class="execution-panel">
+          <div class="message-box-header">
+            <span class="message-box-title" id="msg-panel-title">📋 執行過程</span>
+            <span class="message-box-item-name" id="msg-item-name"></span>
+            <button id="btn-view-toggle" class="btn-view-toggle" title="切換顯示模式">簡化</button>
+          </div>
+          <div class="message-box-body" id="message-content">
+            <span class="message-placeholder">← 點擊任一項目以查看執行過程</span>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 設定對話框 (預設隱藏) -->
+    <div id="settings-overlay" class="overlay hidden">
+      <div id="settings-dialog" class="dialog">
+        <div class="dialog-header">
+          <h2>⚙️ 項目設定</h2>
+          <button id="btn-close-dialog" class="btn-icon" title="關閉">✕</button>
+        </div>
+
+        <div class="dialog-body">
+          <!-- 項目名稱 -->
+          <label class="form-label" for="input-name">項目名稱</label>
+          <input type="text" id="input-name" class="form-input" placeholder="輸入項目名稱" />
+
+          <!-- Prompt 設定 -->
+          <label class="form-label" for="input-prompt">Prompt</label>
+          <textarea id="input-prompt" class="form-textarea" rows="5" placeholder="輸入系統提示詞；可使用 {arg1}、{arg2}、{arg3}…"></textarea>
+
+          <!-- API 設定群組 -->
+          <!-- 預設 AI 模型群組 -->
+          <fieldset class="model-group">
+            <legend>選擇 AI 模型群組</legend>
+            <div class="model-group-content">
+              <div class="preset-row">
+                <select id="select-preset" class="form-select" aria-label="AI 模型群組">
+                  <option value="">自訂</option>
+                </select>
+                <button id="btn-save-preset" class="btn btn-small" title="新增">➕</button>
+              </div>
+
+              <label class="form-label" for="input-api-base-url">API Base URL</label>
+              <input type="text" id="input-api-base-url" class="form-input" placeholder="https://api.openai.com/v1" />
+
+              <label class="form-label" for="input-api-key">API Key</label>
+              <input type="password" id="input-api-key" class="form-input" placeholder="sk-…" />
+
+              <label class="form-label" for="input-model-name">Model Name</label>
+              <input type="text" id="input-model-name" class="form-input" placeholder="gpt-4o" />
+            </div>
+          </fieldset>
+
+          <label class="form-label" for="input-working-directory">工作目錄</label>
+          <div class="workspace-row">
+            <input type="text" id="input-working-directory" class="form-input" placeholder="例如 D:\Projects\MyProject（留空使用 App 工作目錄）" />
+            <button id="btn-select-working-directory" class="btn btn-directory" type="button" title="選擇工作目錄" aria-label="選擇工作目錄">📁</button>
+          </div>
+
+          <fieldset class="tool-group">
+            <legend>Agent Tools</legend>
+            <div class="tool-grid">
+              <label class="tool-option"><input type="checkbox" name="agent-tool" value="list_directory" /> list_directory</label>
+              <label class="tool-option"><input type="checkbox" name="agent-tool" value="search_content" /> search_content</label>
+              <label class="tool-option"><input type="checkbox" name="agent-tool" value="read_file" /> read_file</label>
+              <label class="tool-option"><input type="checkbox" name="agent-tool" value="write_file" /> write_file</label>
+              <label class="tool-option"><input type="checkbox" name="agent-tool" value="replace_string" /> replace_string</label>
+              <label class="tool-option"><input type="checkbox" name="agent-tool" value="trigger_event" /> trigger_event</label>
+            </div>
+            <div id="mcp-tool-section" class="mcp-tool-section"></div>
+            <div class="mcp-tool-actions">
+              <button id="btn-fetch-mcp-tools" class="btn btn-small" type="button">🔌 取得 MCP 工具</button>
+            </div>
+            <p class="tool-hint">只有勾選的工具會提供給 AI；所有檔案操作都限制在設定的工作目錄內。</p>
+          </fieldset>
+
+          <fieldset class="memory-group">
+            <legend>Memory</legend>
+            <div class="memory-toggle-content">
+              <label class="tool-option">
+                <input type="checkbox" id="input-memory" />
+                記憶功能（執行時自動攜帶上次對話歷史）
+              </label>
+            </div>
+          </fieldset>
+
+          <fieldset class="skill-group">
+            <legend>Skills</legend>
+            <div id="skill-list" class="skill-list">
+              <span class="skill-placeholder">（載入中…）</span>
+            </div>
+            <p class="skill-hint">勾選的 Skills 會作為額外的 System Prompt 注入 AI；Skills 放置於 <code>~/.listagent/skills/*.md</code></p>
+          </fieldset>
+
+          <fieldset class="mcp-group">
+            <legend>MCP Servers</legend>
+            <div id="mcp-server-list" class="mcp-server-list"></div>
+            <button id="btn-add-mcp" class="btn btn-small" type="button">＋ 新增 MCP Server</button>
+            <p class="mcp-hint">MCP Server 提供的工具會自動加入 AI 工具集。<br>stdio 指令範例：<code>npx -y @modelcontextprotocol/server-filesystem .</code></p>
+          </fieldset>
+        </div>
+
+        <div class="dialog-footer">
+          <button id="btn-save" class="btn btn-primary">💾 儲存</button>
+          <button id="btn-cancel" class="btn btn-secondary">取消</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- 排程事件設定視窗 -->
+    <div id="events-overlay" class="overlay hidden">
+      <div id="events-dialog" class="dialog events-dialog">
+        <div class="dialog-header">
+          <h2>⏰ 事件設定</h2>
+          <button id="btn-close-events" class="btn-icon" title="關閉">✕</button>
+        </div>
+
+        <div class="dialog-body events-dialog-body">
+          <div class="http-trigger-section">
+            <label class="tool-option">
+              <input type="checkbox" id="input-enable-http" />
+              允許透過 HTTP 請求執行 Agent 任務（監聽埠：37123）
+            </label>
+            <p class="http-hint">啟用後，可透過 GET 或 POST 請求 <code>http://127.0.0.1:37123/input?agent=項目名稱</code> 來觸發任務。</p>
+          </div>
+
+          <div class="event-create-grid">
+            <div class="event-field">
+              <label class="form-label" for="input-event-time">觸發時間</label>
+              <input id="input-event-time" class="form-input" type="datetime-local" step="1" />
+            </div>
+            <div class="event-field">
+              <label class="form-label" for="select-event-agent">執行 Agent</label>
+              <select id="select-event-agent" class="form-select"></select>
+            </div>
+            <div class="event-field">
+              <label class="form-label" for="select-event-recurrence">事件類型</label>
+              <select id="select-event-recurrence" class="form-select">
+                <option value="once">一次性</option>
+                <option value="interval">循環事件</option>
+              </select>
+            </div>
+            <button id="btn-add-event" class="btn btn-primary" type="button">新增</button>
+            <div id="event-interval-fields" class="event-interval-fields hidden">
+              <span class="form-label">循環間隔：每</span>
+              <input id="input-event-interval" class="form-input" type="number" min="1" step="1" value="1" />
+              <select id="select-event-interval-unit" class="form-select">
+                <option value="minutes">分鐘</option>
+                <option value="hours">小時</option>
+                <option value="days">天</option>
+              </select>
+              <span class="form-label">執行一次</span>
+            </div>
+          </div>
+
+          <div id="events-list" class="events-list"></div>
+
+          <div class="event-mapping-section">
+            <h3 class="section-title">🔗 事件訂閱（當自訂事件觸發時執行 Agent）</h3>
+            <div class="event-mapping-create-grid">
+              <div class="event-field">
+                <label class="form-label" for="input-mapping-event-id">事件 ID</label>
+                <input id="input-mapping-event-id" class="form-input" type="text" placeholder="例如 file_updated" />
+              </div>
+              <div class="event-field">
+                <label class="form-label" for="select-mapping-agent">執行 Agent</label>
+                <select id="select-mapping-agent" class="form-select"></select>
+              </div>
+              <button id="btn-add-mapping" class="btn btn-primary" type="button">新增訂閱</button>
+            </div>
+            <div id="event-mappings-list" class="event-mappings-list"></div>
+          </div>
+        </div>
+
+        <div class="dialog-footer">
+          <button id="btn-close-events-footer" class="btn btn-secondary">關閉</button>
+        </div>
+      </div>
+    </div>
+
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>
