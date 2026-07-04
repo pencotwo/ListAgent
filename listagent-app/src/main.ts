@@ -52,6 +52,10 @@ interface ListItem {
   mcpTools: string[]
   memory: boolean
   allowHttp: boolean
+  toolsSearch: boolean
+  embeddingApiBaseUrl: string
+  embeddingApiKey: string
+  embeddingModel: string
 }
 
 type PersistedListItem = Omit<ListItem, 'code'>
@@ -74,9 +78,9 @@ interface EventMapping {
   agentId: number
 }
 
-type ToolName = 'list_directory' | 'search_content' | 'read_file' | 'write_file' | 'replace_string' | 'trigger_event'
+type ToolName = 'list_directory' | 'search_content' | 'read_file' | 'write_file' | 'replace_string' | 'trigger_event' | 'web_search' | 'fetch_url' | 'get_current_time'
 
-const TOOL_NAMES: ToolName[] = ['list_directory', 'search_content', 'read_file', 'write_file', 'replace_string', 'trigger_event']
+const TOOL_NAMES: ToolName[] = ['list_directory', 'search_content', 'read_file', 'write_file', 'replace_string', 'trigger_event', 'web_search', 'fetch_url', 'get_current_time']
 
 interface AgentExecutionResult {
   endpoint: string
@@ -87,14 +91,14 @@ interface AgentExecutionResult {
 interface ModelExchangeEvent {
   itemId: number
   round: number
-  phase: 'request' | 'response' | 'tool' | 'error'
+  phase: 'request' | 'response' | 'tool' | 'error' | 'vector_search'
   endpoint: string
   payload: unknown
 }
 
 interface SessionExchange {
   round: number
-  phase: 'request' | 'response' | 'tool' | 'error'
+  phase: 'request' | 'response' | 'tool' | 'error' | 'vector_search'
   endpoint: string
   payload: unknown
   timestamp: number
@@ -179,6 +183,10 @@ function hydrateItems(storedItems: PersistedListItem[]): ListItem[] {
     mcpTools: Array.isArray(item.mcpTools) ? item.mcpTools : [],
     memory: typeof item.memory === 'boolean' ? item.memory : false,
     allowHttp: typeof item.allowHttp === 'boolean' ? item.allowHttp : false,
+    toolsSearch: typeof item.toolsSearch === 'boolean' ? item.toolsSearch : false,
+    embeddingApiBaseUrl: typeof item.embeddingApiBaseUrl === 'string' ? item.embeddingApiBaseUrl : '',
+    embeddingApiKey: typeof item.embeddingApiKey === 'string' ? item.embeddingApiKey : '',
+    embeddingModel: typeof item.embeddingModel === 'string' ? item.embeddingModel : '',
   }))
 }
 
@@ -197,6 +205,10 @@ function getPersistedItems(): PersistedListItem[] {
     mcpTools: item.mcpTools,
     memory: item.memory,
     allowHttp: item.allowHttp,
+    toolsSearch: item.toolsSearch,
+    embeddingApiBaseUrl: item.embeddingApiBaseUrl,
+    embeddingApiKey: item.embeddingApiKey,
+    embeddingModel: item.embeddingModel,
   }))
 }
 
@@ -298,12 +310,14 @@ function recordModelExchange(exchange: ModelExchangeEvent): void {
     response: '← AI Model 回應',
     tool: '⚙ Tool 執行',
     error: '✖ AI Model 錯誤',
+    vector_search: '🔍 向量搜尋 tools',
   } as const
   const levels: Record<ModelExchangeEvent['phase'], LogLevel> = {
     request: 'info',
     response: 'success',
     tool: 'system',
     error: 'error',
+    vector_search: 'system',
   }
   const now = Date.now()
   logs.push({
@@ -314,6 +328,18 @@ function recordModelExchange(exchange: ModelExchangeEvent): void {
   })
   const simpleEntry = makeSimpleExchangeEntry(exchange.phase, exchange.round, exchange.payload, now)
   if (simpleEntry) logs.push(simpleEntry)
+
+  // 每輪 response 後補一行 token 用量（簡化 & 詳細模式都顯示）
+  if (exchange.phase === 'response') {
+    const usage = extractUsage(exchange.payload)
+    if (usage) {
+      logs.push({
+        level: 'info',
+        message: `📊 Round ${exchange.round} tokens：${formatUsage(usage)}`,
+        timestamp: now + 0.5,
+      })
+    }
+  }
 
   // 同步紀錄到 session exchanges
   if (!currentSessionExchanges.has(exchange.itemId)) {
@@ -341,6 +367,8 @@ interface LogEntry {
   timestamp: number
   /** 'detail' = raw AI JSON (詳細模式顯示)；'simple' = 可讀摘要（簡化模式顯示）；undefined = 永遠顯示 */
   kind?: 'detail' | 'simple'
+  /** 若提供，簡化模式渲染時用此 HTML 取代 escapeHtml(message)。內容必須已安全處理。 */
+  html?: string
 }
 
 // ============================================================
@@ -364,6 +392,10 @@ const inputWorkingDirectory = document.getElementById('input-working-directory')
 const btnSelectWorkingDirectory = document.getElementById('btn-select-working-directory') as HTMLButtonElement
 const toolCheckboxes = Array.from(document.querySelectorAll<HTMLInputElement>('input[name="agent-tool"]'))
 const inputMemory = document.getElementById('input-memory') as HTMLInputElement
+const inputToolsSearch = document.getElementById('input-tools-search') as HTMLInputElement
+const inputEmbeddingBaseUrl = document.getElementById('input-embedding-base-url') as HTMLInputElement
+const inputEmbeddingApiKey = document.getElementById('input-embedding-api-key') as HTMLInputElement
+const inputEmbeddingModel = document.getElementById('input-embedding-model') as HTMLInputElement
 const skillListEl = document.getElementById('skill-list') as HTMLElement
 const selectPreset = document.getElementById('select-preset') as HTMLSelectElement
 const btnSavePreset = document.getElementById('btn-save-preset') as HTMLButtonElement
@@ -734,17 +766,29 @@ async function runItem(id: number, parameters?: unknown): Promise<void> {
         selectedMcpTools: item.mcpTools,
         memory: item.memory,
         itemCode: item.code,
+        toolsSearch: item.toolsSearch,
+        embeddingApiBaseUrl: item.embeddingApiBaseUrl,
+        embeddingApiKey: item.embeddingApiKey,
+        embeddingModel: item.embeddingModel,
       },
     })
     logs.push({ level: 'success', message: `模型端點：${result.endpoint}`, timestamp: Date.now() })
-    logs.push({ level: 'system', message: result.content, timestamp: Date.now() + 1 })
-    if (result.stats) {
-      logs.push({ level: 'info', message: `用量：${JSON.stringify(result.stats)}`, timestamp: Date.now() + 2 })
-    }
+    logs.push({ level: 'system', message: result.content, html: renderMarkdownSafe(result.content), timestamp: Date.now() + 1 })
   } catch (error) {
     logs.push({ level: 'error', message: `模型請求失敗：${String(error)}`, timestamp: Date.now() })
   } finally {
-    logs.push({ level: 'system', message: `══════ Agent「${item.name}」執行結束 ══════`, timestamp: Date.now() })
+    // 統整 token 用量（每輪 + 總計），在結束分隔線之前顯示
+    const summary = summarizeSessionTokens(id)
+    if (summary.rounds.length > 0) {
+      const lines = ['📊 Token 用量統計：']
+      summary.rounds.forEach(({ round, usage }) => {
+        lines.push(`  Round ${round}：${formatUsage(usage)}`)
+      })
+      lines.push(`  ───────────────`)
+      lines.push(`  合計：prompt ${summary.total.prompt} + completion ${summary.total.completion} = ${summary.total.total} tokens`)
+      logs.push({ level: 'info', message: lines.join('\n'), timestamp: Date.now() })
+    }
+    logs.push({ level: 'system', message: `══════ Agent「${item.name}」執行結束 ══════`, timestamp: Date.now() + 1 })
     runningItems.delete(id)
     updateCardRunButton(id, false)
     if (selectedItemId === id && viewingSessionData === null) renderMessageBox(id)
@@ -851,6 +895,50 @@ function truncateForSimple(text: string): string {
   return text.slice(0, SIMPLE_TRUNCATE_LIMIT) + `\n…（已截斷，共 ${text.length} 字）`
 }
 
+interface UsageSummary {
+  prompt: number
+  completion: number
+  total: number
+  cacheHit?: number
+  reasoning?: number
+}
+
+function extractUsage(payload: unknown): UsageSummary | null {
+  const usage = (payload as any)?.body?.usage as Record<string, unknown> | undefined
+  if (!usage) return null
+  const prompt = (usage.prompt_tokens as number) ?? 0
+  const completion = (usage.completion_tokens as number) ?? 0
+  const total = (usage.total_tokens as number) ?? (prompt + completion)
+  if (prompt === 0 && completion === 0 && total === 0) return null
+  const cacheHit = usage.prompt_cache_hit_tokens as number | undefined
+  const reasoning = (usage.completion_tokens_details as any)?.reasoning_tokens as number | undefined
+  return { prompt, completion, total, cacheHit, reasoning }
+}
+
+function formatUsage(u: UsageSummary): string {
+  const extras: string[] = []
+  if (u.cacheHit) extras.push(`cache hit ${u.cacheHit}`)
+  if (u.reasoning) extras.push(`reasoning ${u.reasoning}`)
+  const extraStr = extras.length ? `（${extras.join('，')}）` : ''
+  return `prompt ${u.prompt} + completion ${u.completion} = ${u.total}${extraStr}`
+}
+
+function summarizeSessionTokens(itemId: number): { rounds: { round: number, usage: UsageSummary }[], total: UsageSummary } {
+  const exchanges = currentSessionExchanges.get(itemId) ?? []
+  const rounds: { round: number, usage: UsageSummary }[] = []
+  let prompt = 0, completion = 0, total = 0
+  exchanges.forEach((ex) => {
+    if (ex.phase !== 'response') return
+    const u = extractUsage(ex.payload)
+    if (!u) return
+    rounds.push({ round: ex.round, usage: u })
+    prompt += u.prompt
+    completion += u.completion
+    total += u.total
+  })
+  return { rounds, total: { prompt, completion, total } }
+}
+
 /** 把 log 條目轉為 HTML，簡化模式下只顯示可讀摘要，詳細模式下只顯示原始 JSON */
 function logsToHtml(logs: LogEntry[]): string {
   return logs
@@ -861,10 +949,73 @@ function logsToHtml(logs: LogEntry[]): string {
     })
     .map((entry) => {
       const time = new Date(entry.timestamp).toLocaleTimeString('zh-TW', { hour12: false })
-      const message = viewDetailed ? entry.message : truncateForSimple(entry.message)
-      return `<div class="log-line log-${entry.level}">[${time}] ${escapeHtml(message)}</div>`
+      let body: string
+      if (entry.html) {
+        body = entry.html
+      } else {
+        const message = viewDetailed ? entry.message : truncateForSimple(entry.message)
+        body = escapeHtml(message)
+      }
+      return `<div class="log-line log-${entry.level}">[${time}] ${body}</div>`
     })
     .join('')
+}
+
+/** 輕量 markdown → HTML：處理標題、粗體、分隔線、表格。用於 AI 回覆的簡化模式渲染。 */
+function renderMarkdownSafe(input: string): string {
+  const lines = input.split('\n')
+  const out: string[] = []
+  let i = 0
+  while (i < lines.length) {
+    const line = lines[i]
+    // 表格：目前行是 |...|，下一行是 |---|---|
+    if (line.trim().startsWith('|') && i + 1 < lines.length && /^\s*\|?\s*:?-+:?\s*(\|\s*:?-+:?\s*)+\|?\s*$/.test(lines[i + 1])) {
+      const header = splitTableRow(line)
+      i += 2
+      const rows: string[][] = []
+      while (i < lines.length && lines[i].trim().startsWith('|')) {
+        rows.push(splitTableRow(lines[i]))
+        i++
+      }
+      out.push('<table class="md-table">')
+      out.push('<thead><tr>' + header.map((c) => `<th>${renderInline(c)}</th>`).join('') + '</tr></thead>')
+      out.push('<tbody>' + rows.map((r) => '<tr>' + r.map((c) => `<td>${renderInline(c)}</td>`).join('') + '</tr>').join('') + '</tbody>')
+      out.push('</table>')
+      continue
+    }
+    // 標題 ## / ### / ####
+    const heading = /^(#{2,4})\s+(.+)$/.exec(line)
+    if (heading) {
+      const level = Math.min(6, heading[1].length + 1) // ## → h3, ### → h4
+      out.push(`<h${level} class="md-heading">${renderInline(heading[2])}</h${level}>`)
+      i++
+      continue
+    }
+    // 水平分隔線
+    if (/^\s*(---|===|\*\*\*)\s*$/.test(line)) {
+      out.push('<hr class="md-hr">')
+      i++
+      continue
+    }
+    // 一般行
+    out.push(`<div>${renderInline(line)}</div>`)
+    i++
+  }
+  return out.join('')
+}
+
+function splitTableRow(line: string): string[] {
+  const trimmed = line.trim().replace(/^\|/, '').replace(/\|$/, '')
+  return trimmed.split('|').map((c) => c.trim())
+}
+
+/** inline 元素：粗體 **x**、斜體 *x*、行內程式碼 `x`。輸入會做 HTML escape。 */
+function renderInline(text: string): string {
+  let s = escapeHtml(text)
+  s = s.replace(/`([^`]+)`/g, '<code>$1</code>')
+  s = s.replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>')
+  s = s.replace(/(^|[^*])\*([^*\n]+)\*/g, '$1<em>$2</em>')
+  return s
 }
 
 /** 從 exchange 產生簡化模式的可讀摘要 LogEntry（request 相不需要，回傳 null） */
@@ -888,12 +1039,14 @@ function makeSimpleExchangeEntry(
           .map((tc) => ((tc as Record<string, unknown>)?.function as Record<string, unknown> | undefined)?.name ?? '?')
           .join(', ')
         text = `🤖 AI 決定呼叫工具：${names}`
+        return { level: 'success', message: text, timestamp, kind: 'simple' }
       } else if (content.trim()) {
         text = `🤖 AI 回覆：\n${content}`
+        const html = `🤖 AI 回覆：${renderMarkdownSafe(content)}`
+        return { level: 'success', message: text, html, timestamp, kind: 'simple' }
       } else {
         return null
       }
-      return { level: 'success', message: text, timestamp, kind: 'simple' }
     }
     case 'tool': {
       const name = (p.name as string) ?? '?'
@@ -903,6 +1056,44 @@ function makeSimpleExchangeEntry(
     case 'error': {
       const message = (p.message as string) ?? String(payload)
       return { level: 'error', message: `✖ AI 模型錯誤：${message}`, timestamp, kind: 'simple' }
+    }
+    case 'vector_search': {
+      const sub = p.phase as string | undefined
+      if (sub === 'start') {
+        return {
+          level: 'system',
+          message: `🔍 向量搜尋 tools 開始：model=${p.model}，候選 ${p.candidate_count} 個 tools`,
+          timestamp,
+          kind: 'simple',
+        }
+      }
+      if (sub === 'result') {
+        const unlocked = (p.unlocked as Array<Record<string, unknown>>) ?? []
+        const ranking = (p.ranking as Array<Record<string, unknown>>) ?? []
+        const topLines = unlocked.map((u) => {
+          const flag = u.already_unlocked ? '（已解鎖）' : '（新解鎖）'
+          return `    ✓ ${u.name}  score=${Number(u.score).toFixed(3)} ${flag}`
+        }).join('\n')
+        const restLines = ranking.slice(unlocked.length, unlocked.length + 4).map((r) =>
+          `    · ${r.name}  score=${Number(r.score).toFixed(3)}`
+        ).join('\n')
+        const restBlock = restLines ? `\n  其餘排名（未解鎖）：\n${restLines}` : ''
+        return {
+          level: 'system',
+          message: `🔍 向量搜尋 tools 完成（維度 ${p.embedding_dim}）：\n  Top-${p.top_k} 已進 tools[]：\n${topLines}${restBlock}`,
+          timestamp,
+          kind: 'simple',
+        }
+      }
+      if (sub === 'error') {
+        return {
+          level: 'error',
+          message: `🔍 向量搜尋 tools 失敗（略過，退回原本 tools_search 模式）：${p.error}`,
+          timestamp,
+          kind: 'simple',
+        }
+      }
+      return null
     }
     default:
       return null
@@ -930,8 +1121,17 @@ function formatSessionTimestamp(date: Date): string {
 /** 儲存本次執行的 session 到檔案 */
 async function saveCurrentSession(item: ListItem): Promise<void> {
   if (!isTauri()) return
+  const logs = itemLogs.get(item.id) ?? []
   const exchanges = currentSessionExchanges.get(item.id)
-  if (!exchanges || exchanges.length === 0) return
+  if (!exchanges || exchanges.length === 0) {
+    logs.push({
+      level: 'warn',
+      message: `⚠ 本次無 AI Model 交換內容，未產生 session 檔（工作目錄：${item.workingDirectory || '（未設定，將寫入 ~/.listagent/sessions）'}）`,
+      timestamp: Date.now(),
+    })
+    if (selectedItemId === item.id && viewingSessionData === null) renderMessageBox(item.id)
+    return
+  }
 
   const startedAt = currentSessionStartedAt.get(item.id) ?? Date.now()
   const endedAt = Date.now()
@@ -956,6 +1156,11 @@ async function saveCurrentSession(item: ListItem): Promise<void> {
       filename: `${sessionId}.json`,
       content: JSON.stringify(session, null, 2),
     })
+    logs.push({
+      level: 'info',
+      message: `💾 Session 已儲存：${item.workingDirectory ? `${item.workingDirectory}\\.ListAgent\\session\\` : '~/.listagent/sessions/'}${sessionId}.json`,
+      timestamp: Date.now(),
+    })
 
     // 若目前選取的是此 item，刷新歷史清單
     if (selectedItemId === item.id) {
@@ -963,6 +1168,12 @@ async function saveCurrentSession(item: ListItem): Promise<void> {
     }
   } catch (error) {
     console.error('儲存 session 失敗', error)
+    logs.push({
+      level: 'error',
+      message: `✖ Session 儲存失敗：${String(error)}（工作目錄：${item.workingDirectory || '（未設定）'}）`,
+      timestamp: Date.now(),
+    })
+    if (selectedItemId === item.id && viewingSessionData === null) renderMessageBox(item.id)
   }
 }
 
@@ -1572,7 +1783,7 @@ async function loadAndRenderSkills(selectedSkills: string[]): Promise<void> {
     availableSkills = []
   }
   if (availableSkills.length === 0) {
-    skillListEl.innerHTML = '<span class="skill-placeholder">（尚無 Skill 檔案，請在 ~/.listagent/skills/ 目錄下新增 .md 檔案）</span>'
+    skillListEl.innerHTML = '<span class="skill-placeholder">（尚無 Skill 檔案，請在 App 目錄下的 skills/ 資料夾新增 .json 檔案）</span>'
     return
   }
   skillListEl.innerHTML = availableSkills
@@ -1751,6 +1962,10 @@ async function openSettingsDialog(itemId: number): Promise<void> {
     checkbox.checked = item.tools.includes(checkbox.value as ToolName)
   })
   inputMemory.checked = item.memory
+  inputToolsSearch.checked = item.toolsSearch
+  inputEmbeddingBaseUrl.value = item.embeddingApiBaseUrl
+  inputEmbeddingApiKey.value = item.embeddingApiKey
+  inputEmbeddingModel.value = item.embeddingModel
 
   settingsOverlay.classList.remove('hidden')
 
@@ -1814,6 +2029,10 @@ async function saveSettings(): Promise<void> {
     const mcpToolInputs = mcpToolSectionEl.querySelectorAll<HTMLInputElement>('input[name="mcp-tool"]')
     if (mcpToolInputs.length > 0) item.mcpTools = getCheckedMcpTools()
     item.memory = inputMemory.checked
+    item.toolsSearch = inputToolsSearch.checked
+    item.embeddingApiBaseUrl = inputEmbeddingBaseUrl.value.trim()
+    item.embeddingApiKey = inputEmbeddingApiKey.value
+    item.embeddingModel = inputEmbeddingModel.value.trim()
   }
 
   await saveItems()
@@ -1843,6 +2062,10 @@ btnAdd.addEventListener('click', async () => {
     mcpTools: [],
     memory: false,
     allowHttp: false,
+    toolsSearch: false,
+    embeddingApiBaseUrl: '',
+    embeddingApiKey: '',
+    embeddingModel: '',
   }
   items.push(newItem)
   await saveItems()

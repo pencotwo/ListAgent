@@ -13,7 +13,7 @@ use tokio::io::{AsyncBufReadExt, AsyncWriteExt};
 const HTTP_SERVER_ADDRESS: &str = "127.0.0.1:37123";
 const MAX_REQUEST_BODY_SIZE: usize = 1024 * 1024;
 const MAX_QUEUED_INPUTS: usize = 1000;
-const MAX_TOOL_ITERATIONS: usize = 8;
+const MAX_TOOL_ITERATIONS: usize = 30;
 const MAX_TOOL_FILE_SIZE: u64 = 1024 * 1024;
 const MAX_SEARCH_RESULTS: usize = 200;
 
@@ -76,6 +76,14 @@ struct AgentExecutionRequest {
     memory: bool,
     #[serde(default)]
     item_code: String,
+    #[serde(default)]
+    tools_search: bool,
+    #[serde(default, rename = "embeddingApiBaseUrl")]
+    embedding_api_base_url: String,
+    #[serde(default, rename = "embeddingApiKey")]
+    embedding_api_key: String,
+    #[serde(default, rename = "embeddingModel")]
+    embedding_model: String,
 }
 
 #[derive(Debug, Serialize)]
@@ -146,10 +154,25 @@ pub struct ListItem {
     #[serde(rename = "mcpServers")]
     pub mcp_servers: Vec<McpServerConfig>,
     #[serde(default)]
+    #[serde(rename = "mcpTools")]
+    pub mcp_tools: Vec<String>,
+    #[serde(default)]
     pub memory: bool,
     #[serde(default)]
     #[serde(rename = "allowHttp")]
     pub allow_http: bool,
+    #[serde(default)]
+    #[serde(rename = "toolsSearch")]
+    pub tools_search: bool,
+    #[serde(default)]
+    #[serde(rename = "embeddingApiBaseUrl")]
+    pub embedding_api_base_url: String,
+    #[serde(default)]
+    #[serde(rename = "embeddingApiKey")]
+    pub embedding_api_key: String,
+    #[serde(default)]
+    #[serde(rename = "embeddingModel")]
+    pub embedding_model: String,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -221,11 +244,48 @@ fn settings_path() -> PathBuf {
     PathBuf::from(home).join(".listagent").join("settings.json")
 }
 
+fn agent_test_data_dir() -> PathBuf {
+    if cfg!(debug_assertions) {
+        // Dev: repo root (parent of listagent-app which is parent of src-tauri).
+        let manifest = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+        return manifest
+            .ancestors()
+            .nth(2)
+            .map(|p| p.to_path_buf())
+            .unwrap_or_else(|| manifest.clone());
+    }
+    // Release: next to the installed executable.
+    std::env::current_exe()
+        .ok()
+        .and_then(|p| p.parent().map(|p| p.to_path_buf()))
+        .unwrap_or_else(|| PathBuf::from("."))
+}
+
+fn agent_test_history_path() -> PathBuf {
+    agent_test_data_dir().join("agent_test.json")
+}
+
+fn agent_test_autolist_path() -> PathBuf {
+    agent_test_data_dir().join("agent_test_autolist.json")
+}
+
 fn skills_dir() -> PathBuf {
-    let home = std::env::var("USERPROFILE")
-        .or_else(|_| std::env::var("HOME"))
-        .unwrap_or_else(|_| ".".to_string());
-    PathBuf::from(home).join(".listagent").join("skills")
+    if cfg!(debug_assertions) {
+        // Dev: point to the app project root (parent of src-tauri) so devs can
+        // edit skills without digging into target/debug.
+        let manifest = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+        return manifest
+            .parent()
+            .map(|p| p.to_path_buf())
+            .unwrap_or(manifest)
+            .join("skills");
+    }
+    // Release: next to the installed executable.
+    std::env::current_exe()
+        .ok()
+        .and_then(|p| p.parent().map(|p| p.to_path_buf()))
+        .unwrap_or_else(|| PathBuf::from("."))
+        .join("skills")
 }
 
 #[derive(Debug, Serialize)]
@@ -236,31 +296,56 @@ pub struct SkillMeta {
     pub description: String,
 }
 
-fn parse_skill_meta(id: &str, content: &str) -> SkillMeta {
-    let mut name = id.replace('-', " ").replace('_', " ");
-    let mut description = String::new();
-    for line in content.lines() {
-        let trimmed = line.trim();
-        if trimmed.starts_with("# ") && name == id.replace('-', " ").replace('_', " ") {
-            name = trimmed[2..].trim().to_string();
-        } else if !trimmed.is_empty() && description.is_empty() && !trimmed.starts_with('#') {
-            description = if trimmed.len() > 100 {
-                format!("{}…", &trimmed[..99])
-            } else {
-                trimmed.to_string()
-            };
+#[derive(Debug, Deserialize)]
+struct SkillFile {
+    #[serde(default)]
+    name: Option<String>,
+    #[serde(default)]
+    display_name: Option<String>,
+    #[serde(default)]
+    description: Option<String>,
+    #[serde(default)]
+    prompt: Option<String>,
+    #[serde(default)]
+    system_prompt: Option<String>,
+}
+
+fn read_skill_file(id: &str, path: &Path) -> Option<(SkillMeta, String)> {
+    let raw = fs::read_to_string(path).ok()?;
+    let parsed: SkillFile = serde_json::from_str(&raw).ok()?;
+    // Prefer display_name for the shown name; fall back to name; then the id.
+    let name = parsed
+        .display_name
+        .or(parsed.name)
+        .filter(|s| !s.trim().is_empty())
+        .unwrap_or_else(|| id.replace('-', " ").replace('_', " "));
+    let description = {
+        let raw_desc = parsed.description.unwrap_or_default();
+        let trimmed = raw_desc.trim();
+        if trimmed.chars().count() > 100 {
+            let truncated: String = trimmed.chars().take(99).collect();
+            format!("{truncated}…")
+        } else {
+            trimmed.to_string()
         }
-        if !name.is_empty() && !description.is_empty() {
-            break;
-        }
-    }
-    SkillMeta { id: id.to_string(), name, description }
+    };
+    // Accept both `prompt` and `system_prompt`.
+    let prompt = parsed
+        .system_prompt
+        .or(parsed.prompt)
+        .unwrap_or_default();
+    Some((
+        SkillMeta { id: id.to_string(), name, description },
+        prompt,
+    ))
 }
 
 #[tauri::command]
 fn list_skills() -> Result<Vec<SkillMeta>, String> {
     let dir = skills_dir();
     if !dir.exists() {
+        // Auto-create so users have an obvious place to drop *.json skills.
+        let _ = fs::create_dir_all(&dir);
         return Ok(vec![]);
     }
     let mut skills: Vec<SkillMeta> = fs::read_dir(&dir)
@@ -268,12 +353,12 @@ fn list_skills() -> Result<Vec<SkillMeta>, String> {
         .filter_map(|entry| {
             let entry = entry.ok()?;
             let path = entry.path();
-            if path.extension()?.to_str()? != "md" {
+            if path.extension()?.to_str()? != "json" {
                 return None;
             }
             let id = path.file_stem()?.to_str()?.to_string();
-            let content = fs::read_to_string(&path).unwrap_or_default();
-            Some(parse_skill_meta(&id, &content))
+            let (meta, _prompt) = read_skill_file(&id, &path)?;
+            Some(meta)
         })
         .collect();
     skills.sort_by(|a, b| a.name.cmp(&b.name));
@@ -285,10 +370,13 @@ fn load_skill_prompts(skills: &[String]) -> Vec<(String, String)> {
     skills
         .iter()
         .filter_map(|id| {
-            let path = dir.join(format!("{id}.md"));
-            let content = fs::read_to_string(&path).ok()?;
-            let meta = parse_skill_meta(id, &content);
-            Some((meta.name, content))
+            let path = dir.join(format!("{id}.json"));
+            let (meta, prompt) = read_skill_file(id, &path)?;
+            if prompt.trim().is_empty() {
+                None
+            } else {
+                Some((meta.name, prompt))
+            }
         })
         .collect()
 }
@@ -303,15 +391,32 @@ pub struct SessionFileMeta {
 
 fn session_base_dir(working_directory: &str, subdir: &str) -> PathBuf {
     let wd = working_directory.trim();
-    let base = if wd.is_empty() {
-        let home = std::env::var("USERPROFILE")
-            .or_else(|_| std::env::var("HOME"))
-            .unwrap_or_else(|_| ".".to_string());
-        PathBuf::from(home).join(".listagent").join("sessions")
-    } else {
-        PathBuf::from(wd).join(".ListAgent")
-    };
-    base.join(subdir)
+    if !wd.is_empty() {
+        // With a working directory: all items in that workspace share a single
+        // `session/` folder — subdir (item code) is ignored. Filtering by item
+        // happens later when reading, via the itemId inside each session JSON.
+        return PathBuf::from(wd).join(".ListAgent").join("session");
+    }
+    // No working directory → fall back to global per-item folder under HOME.
+    let home = std::env::var("USERPROFILE")
+        .or_else(|_| std::env::var("HOME"))
+        .unwrap_or_else(|_| ".".to_string());
+    PathBuf::from(home).join(".listagent").join("sessions").join(subdir)
+}
+
+/// Parse frontend's item code (base-36, uppercase, zero-padded to 4) back to numeric id.
+fn parse_item_code(code: &str) -> Option<u32> {
+    if code.is_empty() {
+        return None;
+    }
+    u32::from_str_radix(code.trim(), 36).ok()
+}
+
+/// Read a session file's itemId (u64) without loading the whole exchanges array.
+fn read_session_item_id(path: &Path) -> Option<u32> {
+    let content = fs::read_to_string(path).ok()?;
+    let json: Value = serde_json::from_str(&content).ok()?;
+    json.get("itemId").and_then(Value::as_u64).map(|v| v as u32)
 }
 
 #[tauri::command]
@@ -336,6 +441,13 @@ fn list_sessions(
     if !dir.exists() {
         return Ok(vec![]);
     }
+    // When the workspace shares a single session/ folder, filter by itemId
+    // encoded in the frontend's item code (base-36).
+    let filter_item_id = if !working_directory.trim().is_empty() {
+        parse_item_code(&subdir)
+    } else {
+        None
+    };
     let mut sessions = Vec::new();
     for entry in fs::read_dir(&dir).map_err(|e| e.to_string())?.flatten() {
         let path = entry.path();
@@ -345,6 +457,12 @@ fn list_sessions(
         let filename = entry.file_name().to_string_lossy().to_string();
         if !filename.starts_with("session_") {
             continue;
+        }
+        if let Some(target_id) = filter_item_id {
+            match read_session_item_id(&path) {
+                Some(id) if id == target_id => {}
+                _ => continue,
+            }
         }
         let modified_at = entry
             .metadata()
@@ -501,6 +619,53 @@ fn tool_definitions(selected: &[String]) -> Result<Vec<Value>, String> {
                             "arg3": { "type": "string", "description": "Argument 3 of the event." }
                         },
                         "required": ["event_id"],
+                        "additionalProperties": false
+                    }
+                }
+            })),
+            "web_search" => Ok(serde_json::json!({
+                "type": "function",
+                "function": {
+                    "name": "web_search",
+                    "description": "Perform a Google-like web search for the query and retrieve relevant results.",
+                    "parameters": {
+                        "type": "object",
+                        "properties": {
+                            "query": { "type": "string", "description": "The search query to look up on the web." }
+                        },
+                        "required": ["query"],
+                        "additionalProperties": false
+                    }
+                }
+            })),
+            "fetch_url" => Ok(serde_json::json!({
+                "type": "function",
+                "function": {
+                    "name": "fetch_url",
+                    "description": "Fetch a URL and return its plain-text content (HTML tags/scripts stripped, truncated to ~8000 chars). Use this after web_search when you need the actual page content instead of a snippet.",
+                    "parameters": {
+                        "type": "object",
+                        "properties": {
+                            "url": { "type": "string", "description": "Absolute http/https URL to fetch." }
+                        },
+                        "required": ["url"],
+                        "additionalProperties": false
+                    }
+                }
+            })),
+            "get_current_time" => Ok(serde_json::json!({
+                "type": "function",
+                "function": {
+                    "name": "get_current_time",
+                    "description": "Get the current date and time. Use this whenever the user asks about 'now', 'today', 'current time', or when you need an accurate timestamp — do NOT guess based on training data. Call with NO arguments to use the app's default (system) timezone — this is the correct choice unless the user explicitly asked about a specific city/country's local time.",
+                    "parameters": {
+                        "type": "object",
+                        "properties": {
+                            "timezone": {
+                                "type": "string",
+                                "description": "OPTIONAL. Only pass this when the user explicitly asks for a specific location's time (e.g. 'what time is it in New York'). Otherwise omit — the app defaults to the system timezone. IANA name, e.g. 'Asia/Taipei', 'UTC', 'America/New_York'."
+                            }
+                        },
                         "additionalProperties": false
                     }
                 }
@@ -783,6 +948,48 @@ fn execute_tool(
             }
             Ok(format!("已觸發事件：事件 ID 為「{}」，訊息為「{}」，arg1為「{}」，arg2為「{}」，arg3為「{}」", event_id, message, arg1, arg2, arg3))
         }
+        "get_current_time" => {
+            let tz_arg = arguments.get("timezone").and_then(Value::as_str).unwrap_or("").trim();
+            let utc_now = chrono::Utc::now();
+            let (formatted, tz_label, is_default) = if tz_arg.is_empty() {
+                let system_tz_name = iana_time_zone::get_timezone().ok();
+                match system_tz_name.as_deref().and_then(|n| n.parse::<chrono_tz::Tz>().ok()) {
+                    Some(tz) => {
+                        let converted = utc_now.with_timezone(&tz);
+                        (
+                            converted.format("%Y-%m-%d %H:%M:%S %z").to_string(),
+                            system_tz_name.unwrap(),
+                            true,
+                        )
+                    }
+                    None => {
+                        let local = chrono::Local::now();
+                        (
+                            local.format("%Y-%m-%d %H:%M:%S %z").to_string(),
+                            format!("system local ({})", local.offset()),
+                            true,
+                        )
+                    }
+                }
+            } else {
+                let tz: chrono_tz::Tz = tz_arg
+                    .parse()
+                    .map_err(|_| format!("無效的時區：{tz_arg}（請用 IANA 名稱，如 Asia/Taipei）"))?;
+                let converted = utc_now.with_timezone(&tz);
+                (
+                    converted.format("%Y-%m-%d %H:%M:%S %z").to_string(),
+                    tz_arg.to_string(),
+                    false,
+                )
+            };
+            Ok(serde_json::json!({
+                "iso_utc": utc_now.to_rfc3339(),
+                "formatted": formatted,
+                "timezone": tz_label,
+                "source": if is_default { "system default" } else { "user-specified" },
+                "unix_ms": utc_now.timestamp_millis()
+            }).to_string())
+        }
         _ => Err(format!("工具未啟用或不存在：{name}")),
     }
 }
@@ -969,11 +1176,24 @@ fn load_memory_messages(working_directory: &str, item_code: &str) -> Vec<Value> 
     let dir = session_base_dir(working_directory, item_code);
     if !dir.exists() { return vec![]; }
 
+    // When workspace is set, sessions from all items pool together — filter by itemId.
+    let filter_item_id = if !working_directory.trim().is_empty() {
+        parse_item_code(item_code)
+    } else {
+        None
+    };
+
     let mut sessions: Vec<(u64, PathBuf)> = match fs::read_dir(&dir) {
         Ok(rd) => rd.flatten().filter_map(|entry| {
             let path = entry.path();
             if path.extension().and_then(|e| e.to_str()) != Some("json") { return None; }
             if !entry.file_name().to_string_lossy().starts_with("session_") { return None; }
+            if let Some(target_id) = filter_item_id {
+                match read_session_item_id(&path) {
+                    Some(id) if id == target_id => {}
+                    _ => return None,
+                }
+            }
             let modified = entry.metadata().ok()?.modified().ok()?
                 .duration_since(std::time::UNIX_EPOCH).ok()?.as_millis() as u64;
             Some((modified, path))
@@ -1033,6 +1253,395 @@ fn load_memory_messages(working_directory: &str, item_code: &str) -> Vec<Value> 
     }
 }
 
+fn clean_assistant_content(content: &str) -> String {
+    let mut s = content.to_string();
+    while let Some(start_idx) = s.find("<|channel>thought") {
+        if let Some(end_offset) = s[start_idx..].find("<channel|>") {
+            let end_idx = start_idx + end_offset + "<channel|>".len();
+            s.replace_range(start_idx..end_idx, "");
+        } else if let Some(end_offset) = s[start_idx..].find("<|channel|>") {
+            let end_idx = start_idx + end_offset + "<|channel|>".len();
+            s.replace_range(start_idx..end_idx, "");
+        } else {
+            s.replace_range(start_idx.., "");
+            break;
+        }
+    }
+    while let Some(start_idx) = s.find("<|channel>") {
+        if let Some(end_offset) = s[start_idx..].find("<channel|>") {
+            let end_idx = start_idx + end_offset + "<channel|>".len();
+            s.replace_range(start_idx..end_idx, "");
+        } else if let Some(end_offset) = s[start_idx..].find("<|channel|>") {
+            let end_idx = start_idx + end_offset + "<|channel|>".len();
+            s.replace_range(start_idx..end_idx, "");
+        } else {
+            s.replace_range(start_idx.., "");
+            break;
+        }
+    }
+    while let Some(start_idx) = s.find("<thought>") {
+        if let Some(end_offset) = s[start_idx..].find("</thought>") {
+            let end_idx = start_idx + end_offset + "</thought>".len();
+            s.replace_range(start_idx..end_idx, "");
+        } else {
+            s.replace_range(start_idx.., "");
+            break;
+        }
+    }
+    s.trim().to_string()
+}
+
+fn strip_html_tags_and_decode(input: &str) -> String {
+    let mut result = String::new();
+    let mut in_tag = false;
+    for c in input.chars() {
+        if c == '<' {
+            in_tag = true;
+        } else if c == '>' {
+            in_tag = false;
+        } else if !in_tag {
+            result.push(c);
+        }
+    }
+    result = result
+        .replace("&amp;", "&")
+        .replace("&quot;", "\"")
+        .replace("&#x27;", "'")
+        .replace("&apos;", "'")
+        .replace("&lt;", "<")
+        .replace("&gt;", ">")
+        .replace("&nbsp;", " ");
+    result.trim().to_string()
+}
+
+fn url_decode(input: &str) -> String {
+    let mut chars = input.chars();
+    let mut result = String::new();
+    while let Some(c) = chars.next() {
+        if c == '%' {
+            let h1 = chars.next();
+            let h2 = chars.next();
+            if let (Some(c1), Some(c2)) = (h1, h2) {
+                if let Ok(val) = u8::from_str_radix(&format!("{}{}", c1, c2), 16) {
+                    result.push(val as char);
+                    continue;
+                }
+            }
+            result.push('%');
+            if let Some(c1) = h1 { result.push(c1); }
+            if let Some(c2) = h2 { result.push(c2); }
+        } else if c == '+' {
+            result.push(' ');
+        } else {
+            result.push(c);
+        }
+    }
+    result
+}
+
+fn percent_encode(input: &str) -> String {
+    input.bytes().map(|b| {
+        if b.is_ascii_alphanumeric() || b == b'-' || b == b'_' || b == b'.' || b == b'~' {
+            (b as char).to_string()
+        } else {
+            format!("%{:02X}", b)
+        }
+    }).collect()
+}
+
+async fn perform_web_search(query: &str) -> Result<String, String> {
+    let client = reqwest::Client::builder()
+        .connect_timeout(std::time::Duration::from_secs(10))
+        .timeout(std::time::Duration::from_secs(15))
+        .build()
+        .map_err(|e| format!("無法建立 HTTP client: {e}"))?;
+
+    let url = "https://html.duckduckgo.com/html/";
+    let response = client
+        .post(url)
+        .form(&[("q", query)])
+        .header("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, Gecko) Chrome/120.0.0.0 Safari/537.36")
+        .send()
+        .await;
+
+    match response {
+        Ok(res) if res.status().is_success() => {
+            let html = res.text().await.unwrap_or_default();
+            let mut results = Vec::new();
+            
+            let parts: Vec<&str> = html.split("class=\"result ").collect();
+            for part in parts.into_iter().skip(1) {
+                let mut url = String::new();
+                if let Some(a_idx) = part.find("class=\"result__a\"") {
+                    let sub = &part[a_idx..];
+                    if let Some(href_idx) = sub.find("href=\"") {
+                        let start = href_idx + 6;
+                        if let Some(end) = sub[start..].find("\"") {
+                            let raw_url = &sub[start..start + end];
+                            if raw_url.contains("uddg=") {
+                                if let Some(uddg_idx) = raw_url.find("uddg=") {
+                                    let raw_redirect = &raw_url[uddg_idx + 5..];
+                                    let decoded = url_decode(raw_redirect);
+                                    url = if let Some(amp_idx) = decoded.find('&') {
+                                        decoded[..amp_idx].to_string()
+                                    } else {
+                                        decoded
+                                    };
+                                } else {
+                                    url = raw_url.to_string();
+                                }
+                            } else {
+                                url = raw_url.to_string();
+                            }
+                        }
+                    }
+                }
+
+                let mut title = String::new();
+                if let Some(a_idx) = part.find("class=\"result__a\"") {
+                    let sub = &part[a_idx..];
+                    if let Some(tag_close) = sub.find('>') {
+                        let start = tag_close + 1;
+                        if let Some(a_close) = sub[start..].find("</a>") {
+                            title = strip_html_tags_and_decode(&sub[start..start + a_close]);
+                        }
+                    }
+                }
+
+                let mut snippet = String::new();
+                if let Some(snippet_idx) = part.find("class=\"result__snippet\"") {
+                    let sub = &part[snippet_idx..];
+                    if let Some(tag_close) = sub.find('>') {
+                        let start = tag_close + 1;
+                        if let Some(div_close) = sub[start..].find("</div>") {
+                            snippet = strip_html_tags_and_decode(&sub[start..start + div_close]);
+                        }
+                    }
+                }
+
+                if !title.is_empty() && !url.is_empty() {
+                    results.push(serde_json::json!({
+                        "title": title,
+                        "url": url,
+                        "snippet": snippet
+                    }));
+                }
+
+                if results.len() >= 8 {
+                    break;
+                }
+            }
+
+            if !results.is_empty() {
+                return serde_json::to_string_pretty(&results).map_err(|e| e.to_string());
+            }
+        }
+        _ => {}
+    }
+
+    let wiki_url = format!(
+        "https://zh.wikipedia.org/w/api.php?action=opensearch&search={}&limit=8&namespace=0&format=json",
+        percent_encode(query)
+    );
+    let wiki_res = client
+        .get(&wiki_url)
+        .header("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, Gecko) Chrome/120.0.0.0 Safari/537.36")
+        .send()
+        .await
+        .map_err(|e| format!("搜尋失敗且維基百科備用搜尋不可用: {e}"))?;
+
+    let wiki_json: Value = wiki_res
+        .json()
+        .await
+        .map_err(|e| format!("維基百科資料解析失敗: {e}"))?;
+
+    if let Some(arr) = wiki_json.as_array() {
+        if arr.len() >= 4 {
+            let titles = arr[1].as_array().ok_or("無效的維基百科標題欄位")?;
+            let snippets = arr[2].as_array().ok_or("無效的維基百科描述欄位")?;
+            let urls = arr[3].as_array().ok_or("無效的維基百科連結欄位")?;
+            
+            let mut results = Vec::new();
+            for i in 0..titles.len() {
+                results.push(serde_json::json!({
+                    "title": titles[i].as_str().unwrap_or("").to_string(),
+                    "url": urls[i].as_str().unwrap_or("").to_string(),
+                    "snippet": snippets[i].as_str().unwrap_or("").to_string(),
+                }));
+            }
+            return serde_json::to_string_pretty(&results).map_err(|e| e.to_string());
+        }
+    }
+
+    Err("搜尋未傳回任何結果".to_string())
+}
+
+
+/// Call an OpenAI-compatible /v1/embeddings endpoint. `base_url` may already contain
+/// `/embeddings` or be a base like `https://api.openai.com/v1`; both are handled.
+async fn get_embeddings(
+    base_url: &str,
+    api_key: &str,
+    model: &str,
+    inputs: Vec<String>,
+) -> Result<Vec<Vec<f32>>, String> {
+    let base = base_url.trim().trim_end_matches('/');
+    let endpoint = if base.ends_with("/embeddings") {
+        base.to_string()
+    } else {
+        format!("{base}/embeddings")
+    };
+    let client = reqwest::Client::builder()
+        .connect_timeout(std::time::Duration::from_secs(10))
+        .timeout(std::time::Duration::from_secs(60))
+        .build()
+        .map_err(|e| format!("無法建立 HTTP client：{e}"))?;
+    let body = serde_json::json!({ "model": model, "input": inputs });
+    let mut req = client.post(&endpoint).json(&body);
+    if !api_key.trim().is_empty() {
+        req = req.bearer_auth(api_key.trim());
+    }
+    let resp = req.send().await.map_err(|e| format!("embedding 請求失敗：{e}"))?;
+    let status = resp.status();
+    let text = resp.text().await.map_err(|e| format!("讀取 embedding 回應失敗：{e}"))?;
+    if !status.is_success() {
+        return Err(format!("embedding API 回傳 {status}：{text}"));
+    }
+    let json: Value = serde_json::from_str(&text)
+        .map_err(|e| format!("embedding 回應不是有效 JSON：{e}；內容：{text}"))?;
+    let data = json.get("data").and_then(Value::as_array)
+        .ok_or_else(|| format!("embedding 回應缺少 data：{text}"))?;
+    let mut out: Vec<Option<Vec<f32>>> = vec![None; inputs.len()];
+    for item in data {
+        let idx = item.get("index").and_then(Value::as_u64).unwrap_or(0) as usize;
+        let emb = item.get("embedding").and_then(Value::as_array)
+            .ok_or_else(|| format!("embedding item 缺少 embedding：{item}"))?;
+        let vec: Vec<f32> = emb.iter()
+            .filter_map(|v| v.as_f64().map(|x| x as f32))
+            .collect();
+        if idx < out.len() {
+            out[idx] = Some(vec);
+        }
+    }
+    out.into_iter()
+        .enumerate()
+        .map(|(i, v)| v.ok_or_else(|| format!("embedding 缺少 index {i}")))
+        .collect()
+}
+
+fn cosine_similarity(a: &[f32], b: &[f32]) -> f32 {
+    let dot: f32 = a.iter().zip(b.iter()).map(|(x, y)| x * y).sum();
+    let na: f32 = a.iter().map(|x| x * x).sum::<f32>().sqrt();
+    let nb: f32 = b.iter().map(|x| x * x).sum::<f32>().sqrt();
+    if na == 0.0 || nb == 0.0 { 0.0 } else { dot / (na * nb) }
+}
+
+async fn perform_fetch_url(url: &str) -> Result<String, String> {
+    if !(url.starts_with("http://") || url.starts_with("https://")) {
+        return Err("fetch_url 只支援 http/https URL".to_string());
+    }
+    let client = reqwest::Client::builder()
+        .connect_timeout(std::time::Duration::from_secs(10))
+        .timeout(std::time::Duration::from_secs(20))
+        .build()
+        .map_err(|e| format!("無法建立 HTTP client: {e}"))?;
+
+    let response = client
+        .get(url)
+        .header("User-Agent", "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, Gecko) Chrome/120.0.0.0 Safari/537.36")
+        .header("Accept", "text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8")
+        .send()
+        .await
+        .map_err(|e| format!("fetch 失敗：{e}"))?;
+
+    let status = response.status();
+    if !status.is_success() {
+        return Err(format!("fetch 回傳 HTTP {status}"));
+    }
+
+    let content_type = response
+        .headers()
+        .get(reqwest::header::CONTENT_TYPE)
+        .and_then(|v| v.to_str().ok())
+        .unwrap_or("")
+        .to_lowercase();
+
+    let body = response
+        .text()
+        .await
+        .map_err(|e| format!("讀取回應失敗：{e}"))?;
+
+    let text = if content_type.contains("html") || content_type.contains("xml") || content_type.is_empty() {
+        let mut cleaned = strip_html_block(&body, "script");
+        cleaned = strip_html_block(&cleaned, "style");
+        cleaned = strip_html_block(&cleaned, "noscript");
+        let stripped = strip_html_tags_and_decode(&cleaned);
+        collapse_whitespace(&stripped)
+    } else {
+        body
+    };
+
+    const MAX_LEN: usize = 8000;
+    if text.chars().count() > MAX_LEN {
+        let truncated: String = text.chars().take(MAX_LEN).collect();
+        Ok(format!("{truncated}\n\n…（已截斷，原始內容較長）"))
+    } else {
+        Ok(text)
+    }
+}
+
+fn strip_html_block(input: &str, tag: &str) -> String {
+    let lower = input.to_lowercase();
+    let open = format!("<{tag}");
+    let close = format!("</{tag}>");
+    let mut out = String::new();
+    let mut idx = 0;
+    while let Some(rel_start) = lower[idx..].find(&open) {
+        let start = idx + rel_start;
+        out.push_str(&input[idx..start]);
+        let after_open = start + open.len();
+        let gt = match lower[after_open..].find('>') {
+            Some(offset) => after_open + offset + 1,
+            None => { idx = input.len(); break; }
+        };
+        match lower[gt..].find(&close) {
+            Some(offset) => {
+                idx = gt + offset + close.len();
+            }
+            None => { idx = input.len(); break; }
+        }
+    }
+    if idx < input.len() {
+        out.push_str(&input[idx..]);
+    }
+    out
+}
+
+fn collapse_whitespace(input: &str) -> String {
+    let mut out = String::new();
+    let mut last_was_space = false;
+    let mut consecutive_newlines = 0;
+    for c in input.chars() {
+        if c == '\n' {
+            consecutive_newlines += 1;
+            if consecutive_newlines <= 2 {
+                out.push('\n');
+            }
+            last_was_space = true;
+        } else if c.is_whitespace() {
+            if !last_was_space {
+                out.push(' ');
+                last_was_space = true;
+            }
+        } else {
+            out.push(c);
+            last_was_space = false;
+            consecutive_newlines = 0;
+        }
+    }
+    out.trim().to_string()
+}
+
 fn tool_chat_endpoint(base_url: &str) -> Result<String, String> {
     if base_url.ends_with("/chat/completions") {
         return Ok(base_url.to_string());
@@ -1055,7 +1664,28 @@ async fn execute_agent_with_tools(
     has_parameters: bool,
 ) -> Result<AgentExecutionResult, String> {
     let endpoint = tool_chat_endpoint(base_url)?;
-    let builtin_tool_definitions = tool_definitions(&request.tools)?;
+    // Definitions for the tools the user pre-checked (goes straight into tools[] payload).
+    let selected_builtin_defs = tool_definitions(&request.tools)?;
+    // When tools_search is enabled, the discovery pool must include EVERY builtin so the AI
+    // can search for tools the user did not pre-check (e.g. web_search when only tools_search
+    // is checked). Otherwise the pool matches the pre-checked selection.
+    const ALL_BUILTIN_TOOL_NAMES: &[&str] = &[
+        "list_directory",
+        "search_content",
+        "read_file",
+        "write_file",
+        "replace_string",
+        "trigger_event",
+        "web_search",
+        "fetch_url",
+        "get_current_time",
+    ];
+    let catalog_builtin_defs = if request.tools_search {
+        let all_names: Vec<String> = ALL_BUILTIN_TOOL_NAMES.iter().map(|s| s.to_string()).collect();
+        tool_definitions(&all_names)?
+    } else {
+        selected_builtin_defs.clone()
+    };
     let workspace_root = tool_workspace_root(&request.working_directory)?;
 
     // Connect to MCP servers and collect their tools
@@ -1096,8 +1726,189 @@ async fn execute_agent_with_tools(
             Err(e) => eprintln!("MCP {} 初始化失敗：{e}", server.name),
         }
     }
-    let mut tool_definitions = builtin_tool_definitions;
-    tool_definitions.extend(mcp_tool_definitions);
+    // Build a catalog of every tool definition keyed by name — this is the pool
+    // tools_search can discover from. When tools_search is on, catalog contains
+    // all builtin tools (regardless of checkboxes) so the AI can find them by
+    // keyword; when off, it only contains what the user explicitly selected.
+    let mut all_tool_defs: std::collections::HashMap<String, Value> = std::collections::HashMap::new();
+    for def in catalog_builtin_defs.iter().chain(mcp_tool_definitions.iter()) {
+        if let Some(name) = def.pointer("/function/name").and_then(Value::as_str) {
+            all_tool_defs.insert(name.to_string(), def.clone());
+        }
+    }
+
+    // tools_search mode: only the pre-checked built-ins go into tools[] directly
+    // (pre-unlocked). Everything else in the catalog is discovered via tools_search.
+    // No tools_search: catalog only has the checked ones — all unlocked.
+    let mut unlocked_tools: std::collections::HashSet<String> = if request.tools_search {
+        selected_builtin_defs
+            .iter()
+            .filter_map(|def| def.pointer("/function/name").and_then(Value::as_str).map(String::from))
+            .collect()
+    } else {
+        all_tool_defs.keys().cloned().collect()
+    };
+
+    // Vector-search pre-unlock: when tools_search is on AND embedding config is
+    // fully set, embed the user task + tool descriptions and unlock the top-K
+    // most similar tools so the AI can call them immediately (skips a tools_search
+    // round for the common case).
+    let embedding_configured = request.tools_search
+        && !request.embedding_api_base_url.trim().is_empty()
+        && !request.embedding_model.trim().is_empty();
+    let mut vector_unlocked: Vec<(String, f32)> = Vec::new();
+    if embedding_configured && !input.trim().is_empty() {
+        // Prepare docs: name + description + English aliases for better matching.
+        let mut names: Vec<String> = Vec::new();
+        let mut docs: Vec<String> = Vec::new();
+        for (name, def) in &all_tool_defs {
+            let desc = def.pointer("/function/description").and_then(Value::as_str).unwrap_or("");
+            let aliases = tool_aliases(name).join(" ");
+            docs.push(format!("{name}. {desc} {aliases}"));
+            names.push(name.clone());
+        }
+        let mut inputs = Vec::with_capacity(docs.len() + 1);
+        inputs.push(input.clone());
+        inputs.extend(docs);
+        let embed_endpoint = {
+            let base = request.embedding_api_base_url.trim().trim_end_matches('/');
+            if base.ends_with("/embeddings") { base.to_string() } else { format!("{base}/embeddings") }
+        };
+        // Announce the vector search — user sees model, endpoint, candidate count, task snippet.
+        emit_model_exchange(
+            app_handle,
+            request,
+            0,
+            "vector_search",
+            &embed_endpoint,
+            serde_json::json!({
+                "phase": "start",
+                "model": request.embedding_model,
+                "candidate_count": all_tool_defs.len(),
+                "user_task": input.chars().take(200).collect::<String>(),
+            }),
+        );
+        match get_embeddings(
+            &request.embedding_api_base_url,
+            &request.embedding_api_key,
+            &request.embedding_model,
+            inputs,
+        ).await {
+            Ok(embeddings) if embeddings.len() >= 2 => {
+                let query_emb = &embeddings[0];
+                let mut scored: Vec<(f32, String)> = names
+                    .iter()
+                    .enumerate()
+                    .map(|(i, n)| (cosine_similarity(query_emb, &embeddings[i + 1]), n.clone()))
+                    .collect();
+                scored.sort_by(|a, b| b.0.partial_cmp(&a.0).unwrap_or(std::cmp::Ordering::Equal));
+                const TOP_K: usize = 5;
+                // Capture full ranking BEFORE consuming into top-K so we can log it.
+                let ranking: Vec<Value> = scored
+                    .iter()
+                    .map(|(s, n)| serde_json::json!({ "name": n, "score": s }))
+                    .collect();
+                let mut unlocked_this_call: Vec<Value> = Vec::new();
+                for (score, name) in scored.into_iter().take(TOP_K) {
+                    let already = !unlocked_tools.insert(name.clone());
+                    if !already {
+                        vector_unlocked.push((name.clone(), score));
+                    }
+                    unlocked_this_call.push(serde_json::json!({
+                        "name": name,
+                        "score": score,
+                        "already_unlocked": already
+                    }));
+                }
+                emit_model_exchange(
+                    app_handle,
+                    request,
+                    0,
+                    "vector_search",
+                    &embed_endpoint,
+                    serde_json::json!({
+                        "phase": "result",
+                        "top_k": TOP_K,
+                        "ranking": ranking,
+                        "unlocked": unlocked_this_call,
+                        "embedding_dim": embeddings[0].len(),
+                    }),
+                );
+            }
+            Ok(_) => {
+                emit_model_exchange(
+                    app_handle,
+                    request,
+                    0,
+                    "vector_search",
+                    &embed_endpoint,
+                    serde_json::json!({
+                        "phase": "error",
+                        "error": "embedding 回應少於預期（少於 2 筆）"
+                    }),
+                );
+            }
+            Err(e) => {
+                emit_model_exchange(
+                    app_handle,
+                    request,
+                    0,
+                    "vector_search",
+                    &embed_endpoint,
+                    serde_json::json!({
+                        "phase": "error",
+                        "error": e
+                    }),
+                );
+            }
+        }
+    }
+    let tools_search_def = serde_json::json!({
+        "type": "function",
+        "function": {
+            "name": "tools_search",
+            "description": "Discover callable tools for a task. Search by TASK KEYWORDS IN ENGLISH ONLY (what you want to do — 'weather', 'read file', 'current time'). Do NOT use non-English words — translate the user's intent to English first. Do NOT guess tool names. Matched tools become callable on the next round — after receiving results, invoke them directly, do NOT call tools_search again for the same task. Empty query returns a compact index of every tool (no descriptions) — prefer keyword search first.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "query": {
+                        "type": "string",
+                        "description": "Task keyword IN ENGLISH ONLY. E.g. 'weather', 'file', 'time', 'search web', 'edit text'. Translate the user's intent to English before searching. Empty string returns compact index of all tools."
+                    }
+                },
+                "additionalProperties": false
+            }
+        }
+    });
+
+    // Task-keyword aliases for built-in tools — expands search to concept matches.
+    // MCP tools have no aliases (only name/description matching applies).
+    fn tool_aliases(name: &str) -> &'static [&'static str] {
+        match name {
+            "list_directory" => &["folder", "directory", "files", "ls", "dir", "workspace", "browse"],
+            "search_content" => &["grep", "find", "search", "text", "content", "code", "keyword"],
+            "read_file" => &["file", "read", "load", "open", "content", "text"],
+            "write_file" => &["file", "write", "save", "create", "output"],
+            "replace_string" => &["edit", "modify", "change", "update", "patch"],
+            "trigger_event" => &["event", "trigger", "notify", "signal", "integrate", "call", "hook"],
+            "web_search" => &["web", "internet", "google", "search", "online", "news", "weather", "stock", "info", "lookup", "research", "query"],
+            "fetch_url" => &["web", "url", "http", "https", "page", "site", "download", "get", "content", "html", "scrape", "weather", "news"],
+            "get_current_time" => &["time", "date", "now", "today", "clock", "timezone", "current", "moment", "timestamp", "day", "hour", "minute"],
+            _ => &[],
+        }
+    }
+    let build_active_tools = |unlocked: &std::collections::HashSet<String>| -> Vec<Value> {
+        let mut active: Vec<Value> = Vec::new();
+        if request.tools_search {
+            active.push(tools_search_def.clone());
+        }
+        for name in unlocked {
+            if let Some(def) = all_tool_defs.get(name) {
+                active.push(def.clone());
+            }
+        }
+        active
+    };
     let has_user_prompt = has_parameters && !request.prompt.trim().is_empty();
     let skill_prompts = load_skill_prompts(&request.skills);
     let memory_history = if request.memory && !request.item_code.is_empty() {
@@ -1112,10 +1923,71 @@ async fn execute_agent_with_tools(
     for (_, skill_content) in &skill_prompts {
         messages.push(serde_json::json!({ "role": "system", "content": skill_content }));
     }
-    messages.push(serde_json::json!({ "role": "system", "content": format!(
-        "You are a tool-executing coding agent. When the user asks to create, inspect, search, or modify files, you MUST call the available tools and complete the work in the workspace. Do not merely print proposed code instead of using tools. File tools are restricted to this workspace root: {}. Use workspace-relative paths.",
+    let now_line = {
+        let utc_now = chrono::Utc::now();
+        let system_tz_name = iana_time_zone::get_timezone().ok();
+        let (formatted, tz_label) = match system_tz_name.as_deref().and_then(|n| n.parse::<chrono_tz::Tz>().ok()) {
+            Some(tz) => (
+                utc_now.with_timezone(&tz).format("%Y-%m-%d %H:%M:%S %z").to_string(),
+                system_tz_name.unwrap(),
+            ),
+            None => {
+                let local = chrono::Local::now();
+                (
+                    local.format("%Y-%m-%d %H:%M:%S %z").to_string(),
+                    format!("system local ({})", local.offset()),
+                )
+            }
+        };
+        format!("Current date/time: {formatted} ({tz_label}). Use this instead of guessing from training data.")
+    };
+    // With tools_search enabled, hand-picked built-ins are already in tools[]; only
+    // list the LOCKED tools (typically MCP) so the AI knows what extra capabilities
+    // exist behind tools_search.
+    let tools_catalog_hint = if request.tools_search {
+        let mut locked_names: Vec<&String> = all_tool_defs
+            .keys()
+            .filter(|n| !unlocked_tools.contains(*n))
+            .collect();
+        locked_names.sort();
+        if locked_names.is_empty() {
+            String::new()
+        } else {
+            let bullets: Vec<String> = locked_names
+                .iter()
+                .filter_map(|n| {
+                    let desc = all_tool_defs
+                        .get(*n)
+                        .and_then(|d| d.pointer("/function/description"))
+                        .and_then(Value::as_str)
+                        .unwrap_or("")
+                        .split(&['.', '。'][..])
+                        .next()
+                        .unwrap_or("")
+                        .trim();
+                    if desc.is_empty() {
+                        Some(format!("- {n}"))
+                    } else {
+                        Some(format!("- {n}: {desc}"))
+                    }
+                })
+                .collect();
+            format!(
+                "\nAdditional tools (locked — call tools_search with an English keyword to unlock what you need):\n{}",
+                bullets.join("\n")
+            )
+        }
+    } else {
+        String::new()
+    };
+    let workspace_line = format!(
+        "Workspace root: {}. All file tools operate under this directory — use workspace-relative paths (or absolute paths under this root). Do NOT invent unrelated absolute paths.",
         workspace_root.display()
-    ) }));
+    );
+    messages.push(serde_json::json!({
+        "role": "system",
+        "content": format!("You are a tool-executing coding agent.\n{now_line}\n{workspace_line}{tools_catalog_hint}")
+    }));
     messages.extend(memory_history.iter().cloned());
     messages.push(serde_json::json!({ "role": "user", "content": input }));
 
@@ -1137,11 +2009,13 @@ async fn execute_agent_with_tools(
         } else {
             "auto"
         };
+        let active_tools = build_active_tools(&unlocked_tools);
         let mut body = serde_json::json!({
             "model": request.model_name,
             "messages": messages.clone(),
-            "tools": tool_definitions.clone(),
+            "tools": active_tools,
             "tool_choice": tool_choice,
+            "parallel_tool_calls": false,
             "stream": false
         });
         if base_url.ends_with("/api/v1") || base_url.ends_with("/api/v1/chat") {
@@ -1174,14 +2048,6 @@ async fn execute_agent_with_tools(
                 msg["_source"] = Value::String(source);
             }
         }
-        emit_model_exchange(
-            app_handle,
-            request,
-            round,
-            "request",
-            &endpoint,
-            emit_body,
-        );
         let build_request = || {
             let mut req = client.post(&endpoint).json(&body);
             if !request.api_key.trim().is_empty() {
@@ -1199,6 +2065,8 @@ async fn execute_agent_with_tools(
         let response = match send_result {
             Ok(response) => response,
             Err(error) => {
+                // For network errors, surface the request context so the user can debug.
+                emit_model_exchange(app_handle, request, round, "request", &endpoint, emit_body);
                 emit_model_exchange(
                     app_handle,
                     request,
@@ -1215,8 +2083,23 @@ async fn execute_agent_with_tools(
             .text()
             .await
             .map_err(|error| format!("無法讀取模型回應：{error}"))?;
+
+        // Detect the silent-retry case BEFORE emitting anything — thinking models
+        // (e.g. DeepSeek) reject tool_choice="required" with a 400. We fall back
+        // to "auto" transparently and don't want the failed round in the log.
+        if !status.is_success()
+            && status.as_u16() == 400
+            && tool_choice_required
+            && execution_logs.is_empty()
+            && response_body.contains("tool_choice")
+        {
+            tool_choice_required = false;
+            continue; // round_index NOT incremented → retries same round, no emit
+        }
+
         let response_payload = serde_json::from_str(&response_body)
             .unwrap_or_else(|_| serde_json::json!({ "raw": response_body.clone() }));
+        emit_model_exchange(app_handle, request, round, "request", &endpoint, emit_body);
         emit_model_exchange(
             app_handle,
             request,
@@ -1226,25 +2109,22 @@ async fn execute_agent_with_tools(
             serde_json::json!({ "status": status.as_u16(), "body": response_payload }),
         );
         if !status.is_success() {
-            // Thinking models (e.g. DeepSeek) reject tool_choice="required";
-            // silently retry this round with "auto".
-            if status.as_u16() == 400
-                && tool_choice_required
-                && execution_logs.is_empty()
-                && response_body.contains("tool_choice")
-            {
-                tool_choice_required = false;
-                continue; // round_index NOT incremented → retries same round
-            }
             return Err(format!("模型 API 回傳 {status}：{response_body}"));
         }
         let json: Value = serde_json::from_str(&response_body)
             .map_err(|error| format!("模型回應不是有效 JSON：{error}；內容：{response_body}"))?;
         let latest_stats = json.get("usage").cloned();
-        let message = json
+        let mut message = json
             .pointer("/choices/0/message")
             .cloned()
             .ok_or_else(|| format!("模型回應缺少 choices[0].message：{response_body}"))?;
+
+        if let Some(content_val) = message.get_mut("content") {
+            if let Some(content_str) = content_val.as_str() {
+                let cleaned = clean_assistant_content(content_str);
+                *content_val = Value::String(cleaned);
+            }
+        }
         let tool_calls = message
             .get("tool_calls")
             .and_then(Value::as_array)
@@ -1285,9 +2165,90 @@ async fn execute_agent_with_tools(
                 .unwrap_or("{}");
             let arguments: Value = serde_json::from_str(raw_arguments)
                 .map_err(|error| format!("工具 {name} 的參數不是有效 JSON：{error}"))?;
-            let result = if request.tools.iter().any(|enabled| enabled == name) {
-                execute_tool(Some(app_handle), &workspace_root, name, &arguments)
-                    .unwrap_or_else(|error| format!("Error: {error}"))
+            // With tools_search enabled, the tools[] payload only exposes tools_search
+            // itself. Any other tool call is a hallucination unless the AI first unlocked
+            // the tool via tools_search.
+            let is_locked = request.tools_search
+                && name != "tools_search"
+                && !unlocked_tools.contains(name);
+            let result = if is_locked {
+                format!(
+                    "Error: 工具 `{name}` 尚未解鎖。tools_search 模式下，必須先呼叫 tools_search 用 English keyword 搜出並解鎖工具，才能呼叫該工具。"
+                )
+            } else if request.tools_search && name == "tools_search" {
+                let query = arguments.get("query").and_then(Value::as_str).unwrap_or("").trim().to_lowercase();
+                if query.is_empty() {
+                    // Compact index: name-only list, no descriptions, NO unlock.
+                    let mut names: Vec<String> = all_tool_defs.keys().cloned().collect();
+                    names.sort();
+                    serde_json::json!({
+                        "all_tool_names": names,
+                        "next_step": "Call tools_search again with a task keyword (e.g. 'weather', 'file', 'time') to unlock the tools you actually need."
+                    }).to_string()
+                } else {
+                    let mut matches: Vec<Value> = Vec::new();
+                    let mut newly_unlocked: Vec<String> = Vec::new();
+                    for (tool_name, def) in &all_tool_defs {
+                        let desc = def.pointer("/function/description").and_then(Value::as_str).unwrap_or("");
+                        let name_hit = tool_name.to_lowercase().contains(&query);
+                        let desc_hit = desc.to_lowercase().contains(&query);
+                        let alias_hit = tool_aliases(tool_name).iter().any(|a| a.to_lowercase().contains(&query) || query.contains(&a.to_lowercase()));
+                        if name_hit || desc_hit || alias_hit {
+                            matches.push(serde_json::json!({
+                                "name": tool_name,
+                                "description": desc
+                            }));
+                            if unlocked_tools.insert(tool_name.clone()) {
+                                newly_unlocked.push(tool_name.clone());
+                            }
+                        }
+                    }
+                    matches.sort_by(|a, b| {
+                        let an = a.get("name").and_then(Value::as_str).unwrap_or("");
+                        let bn = b.get("name").and_then(Value::as_str).unwrap_or("");
+                        an.cmp(bn)
+                    });
+                    if matches.is_empty() {
+                        serde_json::json!({
+                            "matches": [],
+                            "hint": format!("No tools matched「{query}」. Try broader keywords (e.g. 'web' instead of 'weather', 'file' instead of 'csv'), or pass empty query for the full index.")
+                        }).to_string()
+                    } else {
+                        serde_json::json!({
+                            "matches": matches,
+                            "newly_unlocked": newly_unlocked,
+                            "next_step": "These tools are callable next round. Invoke them directly — do NOT call tools_search again unless you need a different capability."
+                        }).to_string()
+                    }
+                }
+            } else if all_tool_defs.contains_key(name) && !mcp_tool_map.contains_key(name) {
+                // Built-in tool. `all_tool_defs` includes both pre-checked and (in
+                // tools_search mode) auto-discoverable builtins. MCP tools also live
+                // in the catalog, so exclude them here — they're handled below.
+                if name == "web_search" {
+                    let query = arguments.get("query").and_then(Value::as_str).unwrap_or("");
+                    if query.is_empty() {
+                        "Error: web_search 的 query 不可為空".to_string()
+                    } else {
+                        match perform_web_search(query).await {
+                            Ok(s) => s,
+                            Err(e) => format!("Error: {e}"),
+                        }
+                    }
+                } else if name == "fetch_url" {
+                    let url = arguments.get("url").and_then(Value::as_str).unwrap_or("");
+                    if url.is_empty() {
+                        "Error: fetch_url 的 url 不可為空".to_string()
+                    } else {
+                        match perform_fetch_url(url).await {
+                            Ok(s) => s,
+                            Err(e) => format!("Error: {e}"),
+                        }
+                    }
+                } else {
+                    execute_tool(Some(app_handle), &workspace_root, name, &arguments)
+                        .unwrap_or_else(|error| format!("Error: {error}"))
+                }
             } else if let Some(&client_idx) = mcp_tool_map.get(name) {
                 if let Some((server_name, client)) = mcp_clients.get_mut(client_idx) {
                     client.call_tool(name, &arguments).await
@@ -1357,7 +2318,10 @@ async fn execute_agent(
         None => return Err("沒有可傳送的 Prompt 或 HTTP 輸入參數".to_string()),
     };
 
-    if !request.tools.is_empty() || request.mcp_servers.iter().any(|s| s.enabled) {
+    if !request.tools.is_empty()
+        || request.mcp_servers.iter().any(|s| s.enabled)
+        || request.tools_search
+    {
         return execute_agent_with_tools(&app_handle, &request, base_url, input, has_parameters)
             .await;
     }
@@ -1487,7 +2451,7 @@ async fn execute_agent(
     let json: Value = serde_json::from_str(&response_body)
         .map_err(|error| format!("模型回應不是有效 JSON：{error}；內容：{response_body}"))?;
     let content = if is_lm_studio_native {
-        json.get("output")
+        let raw = json.get("output")
             .and_then(Value::as_array)
             .map(|outputs| {
                 outputs
@@ -1497,12 +2461,14 @@ async fn execute_agent(
                     .collect::<Vec<_>>()
                     .join("\n")
             })
-            .unwrap_or_default()
+            .unwrap_or_default();
+        clean_assistant_content(&raw)
     } else {
-        json.pointer("/choices/0/message/content")
+        let raw = json.pointer("/choices/0/message/content")
             .and_then(Value::as_str)
             .unwrap_or_default()
-            .to_string()
+            .to_string();
+        clean_assistant_content(&raw)
     };
 
     Ok(AgentExecutionResult {
@@ -1678,6 +2644,42 @@ fn handle_http_connection(
     }
     if method == "GET" && endpoint == "/health" {
         write_http_response(&mut stream, "200 OK", r#"{"status":"ok"}"#);
+        return;
+    }
+    let json_file_path: Option<PathBuf> = match endpoint {
+        "/agent_test_history" => Some(agent_test_history_path()),
+        "/agent_test_autolist" => Some(agent_test_autolist_path()),
+        _ => None,
+    };
+    if let Some(path) = json_file_path {
+        match method.as_str() {
+            "GET" => {
+                let contents = fs::read_to_string(&path).unwrap_or_else(|_| "[]".to_string());
+                write_http_response(&mut stream, "200 OK", &contents);
+            }
+            "POST" => {
+                if serde_json::from_slice::<Value>(&body).is_err() {
+                    write_http_response(
+                        &mut stream,
+                        "400 Bad Request",
+                        r#"{"error":"body 必須是有效 JSON"}"#,
+                    );
+                    return;
+                }
+                match fs::write(&path, &body) {
+                    Ok(_) => write_http_response(&mut stream, "200 OK", r#"{"ok":true}"#),
+                    Err(error) => {
+                        let response = serde_json::json!({ "error": error.to_string() }).to_string();
+                        write_http_response(&mut stream, "500 Internal Server Error", &response);
+                    }
+                }
+            }
+            _ => write_http_response(
+                &mut stream,
+                "405 Method Not Allowed",
+                r#"{"error":"僅接受 GET 或 POST"}"#,
+            ),
+        }
         return;
     }
     // Check if HTTP trigger is enabled in settings

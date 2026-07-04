@@ -30,6 +30,21 @@
     h1 { font-size: 20px; font-weight: 700; color: var(--accent); margin-bottom: 4px; }
     .subtitle { color: var(--muted); font-size: 13px; margin-bottom: 24px; }
     .server-addr { font-family: var(--mono); color: var(--accent); }
+    .topbar {
+      display: flex;
+      align-items: flex-start;
+      gap: 16px;
+      margin-bottom: 24px;
+    }
+    .topbar .subtitle { flex: 1; margin-bottom: 0; padding-top: 6px; }
+    .topbar details.card.health-inline {
+      margin-bottom: 0;
+      padding: 8px 14px;
+      flex: 0 0 auto;
+      min-width: 180px;
+    }
+    .topbar details.card.health-inline .row { margin-bottom: 0; }
+    .topbar details.card.health-inline[open] .row { margin-top: 10px; margin-bottom: 10px; }
     .card {
       background: var(--surface);
       border: 1px solid var(--border);
@@ -41,6 +56,22 @@
       font-size: 11px; font-weight: 700; text-transform: uppercase;
       letter-spacing: 0.5px; color: var(--muted); margin-bottom: 14px;
     }
+    details.card > summary.card-title {
+      cursor: pointer;
+      user-select: none;
+      list-style: none;
+      margin-bottom: 0;
+      padding: 2px 0;
+    }
+    details.card[open] > summary.card-title { margin-bottom: 14px; }
+    details.card > summary.card-title::-webkit-details-marker { display: none; }
+    details.card > summary.card-title::before {
+      content: '▸';
+      display: inline-block;
+      width: 14px;
+      transition: transform 0.15s ease;
+    }
+    details.card[open] > summary.card-title::before { transform: rotate(90deg); }
     .row { display: flex; gap: 10px; align-items: flex-end; flex-wrap: wrap; margin-bottom: 10px; }
     .field { display: flex; flex-direction: column; gap: 5px; flex: 1; min-width: 150px; }
     .field label { font-size: 11px; font-weight: 600; color: var(--muted); text-transform: uppercase; letter-spacing: 0.4px; }
@@ -115,20 +146,50 @@
       border-radius: 3px; flex-shrink: 0; font-size: 10px;
     }
     .h-url { color: var(--accent); flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .autolist { display: flex; flex-direction: column; gap: 4px; }
+    .autolist-item {
+      display: flex; align-items: center; gap: 8px; padding: 6px 8px;
+      border-radius: 5px; background: var(--bg); font-size: 11px;
+      font-family: var(--mono); border: 1px solid transparent;
+      transition: border-color 0.15s;
+    }
+    .autolist-item:hover { border-color: var(--border); }
+    .autolist-item .a-url { color: var(--accent); flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; cursor: pointer; }
+    .autolist-item .a-del,
+    .autolist-item .a-run {
+      color: var(--muted); background: transparent; border: none;
+      cursor: pointer; padding: 2px 6px; border-radius: 4px; font-size: 12px;
+    }
+    .autolist-item .a-run:hover { color: var(--accent); background: var(--accent-light); }
+    .autolist-item .a-del:hover { color: var(--error); background: rgba(252,165,165,0.1); }
+    .autolist-item .a-status { font-size: 10px; font-family: var(--mono); padding: 1px 6px; border-radius: 8px; flex-shrink: 0; }
+    .autolist-item .a-status.ok  { background: rgba(134,239,172,0.15); color: var(--success); }
+    .autolist-item .a-status.err { background: rgba(252,165,165,0.15); color: var(--error); }
+    .autolist-item .a-status.pending { background: rgba(253,230,138,0.15); color: var(--warn); }
+    .autolist-empty { color: var(--muted); font-size: 12px; padding: 6px 8px; }
   </style>
 </head>
 <body>
   <h1>🛜 ListAgent HTTP Server 測試</h1>
-  <p class="subtitle">伺服器位址：<span class="server-addr">http://127.0.0.1:37123</span></p>
+  <div class="topbar">
+    <p class="subtitle">伺服器位址：<span class="server-addr">http://127.0.0.1:37123</span></p>
+    <details class="card health-inline">
+      <summary class="card-title">Health Check</summary>
+      <div class="row">
+        <button class="btn btn-primary" id="btn-health">GET /health</button>
+      </div>
+      <div class="res-header" id="health-header"></div>
+      <div class="response-box" id="health-res">（尚未送出）</div>
+    </details>
+  </div>
 
-  <!-- Health Check -->
+  <!-- Auto List -->
   <div class="card">
-    <div class="card-title">Health Check</div>
-    <div class="row">
-      <button class="btn btn-primary" id="btn-health">GET /health</button>
+    <div class="card-title-row">
+      <div class="card-title">AUTO LIST</div>
+      <button class="btn-ghost" id="btn-autolist-run-all">▶ 全部執行</button>
     </div>
-    <div class="res-header" id="health-header"></div>
-    <div class="response-box" id="health-res">（尚未送出）</div>
+    <div class="autolist" id="autolist"></div>
   </div>
 
   <!-- Send Input -->
@@ -177,6 +238,7 @@
         <button class="btn btn-primary" id="btn-get-send">送出 GET</button>
         <button class="btn btn-secondary" id="btn-get-copy">複製 URL</button>
         <button class="btn btn-secondary" id="btn-get-open">瀏覽器開啟</button>
+        <button class="btn btn-secondary" id="btn-get-add">＋ ADD</button>
       </div>
     </div>
 
@@ -218,16 +280,16 @@
 
 <script>
 const BASE = 'http://127.0.0.1:37123'
-const HISTORY_KEY = 'listagent_test_history'
+const HISTORY_URL = BASE + '/agent_test_history'
+const AUTOLIST_URL = BASE + '/agent_test_autolist'
 
-// 從 localStorage 載入歷史
-const reqHistory = (function() {
-  try {
-    const raw = localStorage.getItem(HISTORY_KEY)
-    if (raw) return JSON.parse(raw)
-  } catch (_) {}
-  return []
-}())
+// 歷史存到 App 目錄的 agent_test.json；頁面載入時從 server GET，變更後 POST 回去。
+const reqHistory = []
+let historyLoaded = false
+
+// Auto list：存到 agent_test_autolist.json
+const autoList = []
+let autoListLoaded = false
 
 // ── 工具函式 ──────────────────────────────────────────────────
 
@@ -288,7 +350,160 @@ function setNetError(headerId, bodyId, err) {
 }
 
 function saveHistory() {
-  try { localStorage.setItem(HISTORY_KEY, JSON.stringify(reqHistory)) } catch (_) {}
+  if (!historyLoaded) return  // avoid overwriting file before initial load finishes
+  fetch(HISTORY_URL, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(reqHistory),
+  }).catch(function() { /* 無 App 執行時忽略 */ })
+}
+
+function saveAutoList() {
+  if (!autoListLoaded) return
+  fetch(AUTOLIST_URL, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(autoList),
+  }).catch(function() {})
+}
+
+function loadAutoList() {
+  return fetch(AUTOLIST_URL).then(function(r) { return r.json() }).then(function(arr) {
+    if (Array.isArray(arr)) {
+      autoList.length = 0
+      arr.forEach(function(x) { autoList.push(x) })
+    }
+    autoListLoaded = true
+    renderAutoList()
+  }).catch(function() {
+    autoListLoaded = true
+    renderAutoList()
+  })
+}
+
+function renderAutoList() {
+  const el = document.getElementById('autolist')
+  if (autoList.length === 0) {
+    el.innerHTML = '<div class="autolist-empty">尚無項目。填好 GET 表單，按 ADD 新增。</div>'
+    return
+  }
+  el.innerHTML = ''
+  autoList.forEach(function(item, i) {
+    const row = document.createElement('div')
+    row.className = 'autolist-item'
+    row.dataset.index = String(i)
+    const url = document.createElement('span')
+    url.className = 'a-url'
+    url.textContent = item.url
+    url.title = item.url
+    url.addEventListener('click', function() { reuseAutoList(i) })
+    const status = document.createElement('span')
+    status.className = 'a-status'
+    status.textContent = ''
+    const run = document.createElement('button')
+    run.className = 'a-run'
+    run.textContent = '▶'
+    run.title = '執行 GET'
+    run.addEventListener('click', function(e) {
+      e.stopPropagation()
+      runAutoListItem(i)
+    })
+    const del = document.createElement('button')
+    del.className = 'a-del'
+    del.textContent = '✕'
+    del.title = '刪除'
+    del.addEventListener('click', function(e) {
+      e.stopPropagation()
+      autoList.splice(i, 1)
+      saveAutoList()
+      renderAutoList()
+    })
+    row.appendChild(url)
+    row.appendChild(status)
+    row.appendChild(run)
+    row.appendChild(del)
+    el.appendChild(row)
+  })
+}
+
+function setAutoListStatus(i, cls, text) {
+  const row = document.querySelector('.autolist-item[data-index="' + i + '"]')
+  if (!row) return
+  const s = row.querySelector('.a-status')
+  if (!s) return
+  s.className = 'a-status ' + cls
+  s.textContent = text
+}
+
+async function runAutoListItem(i) {
+  const item = autoList[i]
+  if (!item || !item.url) return
+  setAutoListStatus(i, 'pending', '…')
+  try {
+    const res = await fetch(item.url)
+    const text = await res.text()
+    setResponse('input-header', 'input-res', res.status, text)
+    addHistory('GET', item.url)
+    setAutoListStatus(i, res.ok ? 'ok' : 'err', String(res.status))
+  } catch (err) {
+    setNetError('input-header', 'input-res', err)
+    setAutoListStatus(i, 'err', 'NET')
+  }
+}
+
+async function runAllAutoList() {
+  for (let i = 0; i < autoList.length; i++) {
+    await runAutoListItem(i)
+  }
+}
+
+function addCurrentToAutoList() {
+  const url = buildGetUrl()
+  if (!url) {
+    alert('請先填入 agent 名稱')
+    return
+  }
+  // 存整個 GET 表單狀態 + 完整 URL，方便 reuse
+  autoList.unshift({
+    url: url,
+    agent: document.getElementById('get-agent').value,
+    arg1: document.getElementById('get-arg1').value,
+    arg2: document.getElementById('get-arg2').value,
+    arg3: document.getElementById('get-arg3').value,
+    message: document.getElementById('get-message').value,
+    extra: document.getElementById('get-extra').value,
+  })
+  if (autoList.length > 100) autoList.pop()
+  saveAutoList()
+  renderAutoList()
+}
+
+function reuseAutoList(i) {
+  const item = autoList[i]
+  if (!item) return
+  document.getElementById('get-agent').value = item.agent || ''
+  document.getElementById('get-arg1').value = item.arg1 || ''
+  document.getElementById('get-arg2').value = item.arg2 || ''
+  document.getElementById('get-arg3').value = item.arg3 || ''
+  document.getElementById('get-message').value = item.message || ''
+  document.getElementById('get-extra').value = item.extra || ''
+  updateUrlPreview()
+  // 切到 GET tab（可能目前在 POST）
+  document.getElementById('tab-get').click()
+}
+
+function loadHistory() {
+  return fetch(HISTORY_URL).then(function(r) { return r.json() }).then(function(arr) {
+    if (Array.isArray(arr)) {
+      reqHistory.length = 0
+      arr.forEach(function(item) { reqHistory.push(item) })
+    }
+    historyLoaded = true
+    renderHistory()
+  }).catch(function() {
+    historyLoaded = true  // still allow saving even if initial load fails
+    renderHistory()
+  })
 }
 
 function addHistory(method, url) {
@@ -428,6 +643,9 @@ document.getElementById('btn-get-open').addEventListener('click', function() {
   window.open(url, '_blank')
 })
 
+document.getElementById('btn-get-add').addEventListener('click', addCurrentToAutoList)
+document.getElementById('btn-autolist-run-all').addEventListener('click', runAllAutoList)
+
 document.getElementById('btn-post-example').addEventListener('click', function() {
   document.getElementById('post-agent').value = '項目 1'
   document.getElementById('post-body').value = JSON.stringify({ arg1: '你好', arg2: 'world' }, null, 2)
@@ -443,8 +661,9 @@ document.getElementById('btn-clear-history').addEventListener('click', function(
   document.getElementById(id).addEventListener('input', updateUrlPreview)
 })
 
-// 頁面載入時渲染已儲存的歷史
-renderHistory()
+// 頁面載入時從 App 目錄拉歷史 + auto list
+loadHistory()
+loadAutoList()
 </script>
 </body>
 </html>

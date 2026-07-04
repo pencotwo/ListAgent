@@ -128,12 +128,36 @@
               <label class="tool-option"><input type="checkbox" name="agent-tool" value="write_file" /> write_file</label>
               <label class="tool-option"><input type="checkbox" name="agent-tool" value="replace_string" /> replace_string</label>
               <label class="tool-option"><input type="checkbox" name="agent-tool" value="trigger_event" /> trigger_event</label>
+              <label class="tool-option"><input type="checkbox" name="agent-tool" value="web_search" /> web_search</label>
+              <label class="tool-option"><input type="checkbox" name="agent-tool" value="fetch_url" /> fetch_url</label>
+              <label class="tool-option"><input type="checkbox" name="agent-tool" value="get_current_time" /> get_current_time</label>
             </div>
             <div id="mcp-tool-section" class="mcp-tool-section"></div>
             <div class="mcp-tool-actions">
               <button id="btn-fetch-mcp-tools" class="btn btn-small" type="button">🔌 取得 MCP 工具</button>
             </div>
             <p class="tool-hint">只有勾選的工具會提供給 AI；所有檔案操作都限制在設定的工作目錄內。</p>
+            <label class="tool-option">
+              <input type="checkbox" id="input-tools-search" />
+              tools search（勾選後，初始不帶工具給 AI，AI 需先呼叫 <code>tools_search</code> 搜出需要的工具，才會在後續 round 加入該工具）
+            </label>
+            <div class="embedding-config">
+              <p class="tool-hint">🔍 <b>向量搜尋 tools</b>（tools_search 開啟時生效）：填入 embedding API 三個欄位後，會用向量搜尋從使用者任務挑最相關的 top-5 工具，預先解鎖進 tools[] payload，AI 少一輪 tools_search。三欄任一為空則跳過。</p>
+              <div class="row">
+                <div class="field">
+                  <label>Embedding API Base URL</label>
+                  <input id="input-embedding-base-url" type="text" placeholder="例如：https://api.openai.com/v1" />
+                </div>
+                <div class="field">
+                  <label>Embedding API Key</label>
+                  <input id="input-embedding-api-key" type="password" placeholder="（選填）" />
+                </div>
+                <div class="field">
+                  <label>Embedding Model</label>
+                  <input id="input-embedding-model" type="text" placeholder="例如：text-embedding-3-small" />
+                </div>
+              </div>
+            </div>
           </fieldset>
 
           <fieldset class="memory-group">
@@ -147,11 +171,11 @@
           </fieldset>
 
           <fieldset class="skill-group">
-            <legend>Skills</legend>
+            <legend>SKILLS</legend>
             <div id="skill-list" class="skill-list">
               <span class="skill-placeholder">（載入中…）</span>
             </div>
-            <p class="skill-hint">勾選的 Skills 會作為額外的 System Prompt 注入 AI；Skills 放置於 <code>~/.listagent/skills/*.md</code></p>
+            <p class="skill-hint">勾選的 Skills 會作為額外的 System Prompt 注入 AI；Skills 放置於 App 目錄下的 <code>skills/*.json</code>（格式：<code>{"name","description","prompt"}</code>）</p>
           </fieldset>
 
           <fieldset class="mcp-group">

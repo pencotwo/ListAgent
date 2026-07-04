@@ -1484,6 +1484,61 @@ body {
   animation: logFadeIn 0.2s ease;
 }
 
+.log-line .md-table {
+  border-collapse: collapse;
+  margin: 8px 0;
+  font-size: 0.95em;
+  background: rgba(255, 255, 255, 0.03);
+}
+.log-line .md-table th,
+.log-line .md-table td {
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  padding: 4px 10px;
+  text-align: left;
+  vertical-align: top;
+  white-space: normal;
+  word-break: break-word;
+}
+.log-line .md-table th {
+  background: rgba(255, 255, 255, 0.06);
+  font-weight: 600;
+}
+.log-line .md-heading {
+  margin: 10px 0 4px;
+  font-size: 1em;
+  font-weight: 700;
+}
+.log-line .md-hr {
+  border: 0;
+  border-top: 1px dashed rgba(255, 255, 255, 0.2);
+  margin: 8px 0;
+}
+.log-line code {
+  background: rgba(255, 255, 255, 0.08);
+  padding: 1px 4px;
+  border-radius: 3px;
+  font-size: 0.92em;
+}
+
+@media (prefers-color-scheme: light) {
+  .log-line .md-table {
+    background: rgba(0, 0, 0, 0.02);
+  }
+  .log-line .md-table th,
+  .log-line .md-table td {
+    border-color: rgba(0, 0, 0, 0.15);
+  }
+  .log-line .md-table th {
+    background: rgba(0, 0, 0, 0.05);
+  }
+  .log-line .md-hr {
+    border-top-color: rgba(0, 0, 0, 0.2);
+  }
+  .log-line code {
+    background: rgba(0, 0, 0, 0.06);
+  }
+}
+
 @keyframes logFadeIn {
   from { opacity: 0; transform: translateX(-8px); }
   to   { opacity: 1; transform: translateX(0); }
