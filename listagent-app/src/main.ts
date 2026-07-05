@@ -975,7 +975,7 @@ async function runItem(id: number, parameters?: unknown, execId?: string): Promi
         lines.push(`  Round ${round}：${formatUsage(usage)}`)
       })
       lines.push(`  ───────────────`)
-      lines.push(`  合計：prompt ${summary.total.prompt} + completion ${summary.total.completion} = ${summary.total.total} tokens`)
+      lines.push(`  合計：${formatUsage(summary.total)}`)
       logs.push({ level: 'info', message: lines.join('\n'), timestamp: Date.now() })
     }
     logs.push({ level: 'system', message: `══════ Agent「${item.name}」執行結束 ══════`, timestamp: Date.now() + 1 })
@@ -1109,8 +1109,10 @@ interface UsageSummary {
   prompt: number
   completion: number
   total: number
-  cacheHit?: number
-  reasoning?: number
+  cacheHit?: number       // prompt_cache_hit_tokens
+  cacheMiss?: number      // prompt_cache_miss_tokens
+  cachedTokens?: number   // prompt_tokens_details.cached_tokens
+  reasoning?: number      // completion_tokens_details.reasoning_tokens
 }
 
 function extractUsage(payload: unknown): UsageSummary | null {
@@ -1121,22 +1123,34 @@ function extractUsage(payload: unknown): UsageSummary | null {
   const total = (usage.total_tokens as number) ?? (prompt + completion)
   if (prompt === 0 && completion === 0 && total === 0) return null
   const cacheHit = usage.prompt_cache_hit_tokens as number | undefined
+  const cacheMiss = usage.prompt_cache_miss_tokens as number | undefined
+  const cachedTokens = (usage.prompt_tokens_details as any)?.cached_tokens as number | undefined
   const reasoning = (usage.completion_tokens_details as any)?.reasoning_tokens as number | undefined
-  return { prompt, completion, total, cacheHit, reasoning }
+  return { prompt, completion, total, cacheHit, cacheMiss, cachedTokens, reasoning }
 }
 
 function formatUsage(u: UsageSummary): string {
-  const extras: string[] = []
-  if (u.cacheHit) extras.push(`cache hit ${u.cacheHit}`)
-  if (u.reasoning) extras.push(`reasoning ${u.reasoning}`)
-  const extraStr = extras.length ? `（${extras.join('，')}）` : ''
-  return `prompt ${u.prompt} + completion ${u.completion} = ${u.total}${extraStr}`
+  // prompt 的細節：cache hit / miss / cached_tokens
+  const promptExtras: string[] = []
+  if (u.cacheHit !== undefined) promptExtras.push(`cache hit ${u.cacheHit}`)
+  if (u.cacheMiss !== undefined) promptExtras.push(`cache miss ${u.cacheMiss}`)
+  if (u.cachedTokens !== undefined) promptExtras.push(`cached_tokens ${u.cachedTokens}`)
+  const promptStr = promptExtras.length
+    ? `prompt ${u.prompt} (${promptExtras.join(', ')})`
+    : `prompt ${u.prompt}`
+  // completion 的細節：reasoning
+  const completionStr = u.reasoning !== undefined
+    ? `completion ${u.completion} (reasoning ${u.reasoning})`
+    : `completion ${u.completion}`
+  return `${promptStr} + ${completionStr} = ${u.total}`
 }
 
 function summarizeSessionTokens(itemId: number): { rounds: { round: number, usage: UsageSummary }[], total: UsageSummary } {
   const exchanges = currentSessionExchanges.get(itemId) ?? []
   const rounds: { round: number, usage: UsageSummary }[] = []
   let prompt = 0, completion = 0, total = 0
+  let cacheHit = 0, cacheMiss = 0, cachedTokens = 0, reasoning = 0
+  let hasCacheHit = false, hasCacheMiss = false, hasCachedTokens = false, hasReasoning = false
   exchanges.forEach((ex) => {
     if (ex.phase !== 'response') return
     const u = extractUsage(ex.payload)
@@ -1145,8 +1159,21 @@ function summarizeSessionTokens(itemId: number): { rounds: { round: number, usag
     prompt += u.prompt
     completion += u.completion
     total += u.total
+    if (u.cacheHit !== undefined) { cacheHit += u.cacheHit; hasCacheHit = true }
+    if (u.cacheMiss !== undefined) { cacheMiss += u.cacheMiss; hasCacheMiss = true }
+    if (u.cachedTokens !== undefined) { cachedTokens += u.cachedTokens; hasCachedTokens = true }
+    if (u.reasoning !== undefined) { reasoning += u.reasoning; hasReasoning = true }
   })
-  return { rounds, total: { prompt, completion, total } }
+  return {
+    rounds,
+    total: {
+      prompt, completion, total,
+      cacheHit: hasCacheHit ? cacheHit : undefined,
+      cacheMiss: hasCacheMiss ? cacheMiss : undefined,
+      cachedTokens: hasCachedTokens ? cachedTokens : undefined,
+      reasoning: hasReasoning ? reasoning : undefined,
+    },
+  }
 }
 
 /** 把 log 條目轉為 HTML，簡化模式下只顯示可讀摘要，詳細模式下只顯示原始 JSON */
