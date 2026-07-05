@@ -40,6 +40,7 @@ interface McpServerConfig {
 interface ListItem {
   id: number
   code: string
+  agentId: string
   name: string
   prompt: string
   apiBaseUrl: string
@@ -69,7 +70,9 @@ interface Preset {
 
 interface HttpInput {
   agent: string
+  agentId?: string
   parameters: unknown
+  execId?: string
 }
 
 interface EventMapping {
@@ -170,10 +173,18 @@ function itemCodeFromId(id: number): string {
   return code.padStart(4, '0')
 }
 
+/** 產生一個新的、穩定的 agent_id — 之後不再改變（即使 item 改名） */
+function generateAgentId(): string {
+  const rand = (globalThis.crypto?.randomUUID?.() ?? '').replace(/-/g, '').slice(0, 12)
+  return 'ag_' + (rand || (Date.now().toString(36) + Math.random().toString(36).slice(2, 8)))
+}
+
 function hydrateItems(storedItems: PersistedListItem[]): ListItem[] {
   return storedItems.map((item) => ({
     ...item,
     code: itemCodeFromId(item.id),
+    // 舊資料沒有 agentId，這裡自動補一個穩定 ID（下次 saveItems 就會存下來）
+    agentId: typeof item.agentId === 'string' && item.agentId ? item.agentId : generateAgentId(),
     workingDirectory: typeof item.workingDirectory === 'string' ? item.workingDirectory : '',
     tools: Array.isArray(item.tools)
       ? item.tools.filter((tool): tool is ToolName => TOOL_NAMES.includes(tool as ToolName))
@@ -193,6 +204,7 @@ function hydrateItems(storedItems: PersistedListItem[]): ListItem[] {
 function getPersistedItems(): PersistedListItem[] {
   return items.map((item) => ({
     id: item.id,
+    agentId: item.agentId,
     name: item.name,
     prompt: item.prompt,
     apiBaseUrl: item.apiBaseUrl,
@@ -270,9 +282,82 @@ let viewingSessionPath: string | null = null
 /** 目前正在等待模型回應的 item */
 const runningItems = new Set<number>()
 
+interface AgentTaskDetail {
+  currentRound?: number
+  currentTokens?: number
+  lastEndedAt?: number
+  lastSuccess?: boolean
+  lastContentPreview?: string
+  lastTokens?: number
+  lastRounds?: number
+  currentExecId?: string
+  lastExecId?: string
+  lastSessionPath?: string
+  lastSessionUrl?: string
+}
+
+/** 每個 agent name 的上一次任務結果（跨 runItem 執行保留） */
+const lastTaskByAgent = new Map<string, AgentTaskDetail>()
+
+/** 每個 item 目前執行中 task 的 execId（來自 HTTP request 的 exec_id 參數） */
+const currentExecIdByItem = new Map<number, string>()
+
+/** 從 currentSessionExchanges 抓目前跑到第幾 round + 累積 tokens */
+function getCurrentTaskInfo(itemId: number): { currentRound: number, currentTokens: number } | null {
+  const exchanges = currentSessionExchanges.get(itemId)
+  if (!exchanges || exchanges.length === 0) return null
+  let maxRound = 0
+  let totalTokens = 0
+  exchanges.forEach((ex) => {
+    if (ex.phase !== 'response') return
+    if (ex.round > maxRound) maxRound = ex.round
+    const u = extractUsage(ex.payload)
+    if (u) totalTokens += u.total
+  })
+  return { currentRound: maxRound, currentTokens: totalTokens }
+}
+
+/** 把目前的 running/queued 狀態同步到 Rust，讓 HTTP action=get_status 能查詢到 */
+function syncAgentStatus(): void {
+  if (!isTauri()) return
+  const running: string[] = []
+  const queued: Record<string, number> = {}
+  const detail: Record<string, AgentTaskDetail> = {}
+
+  // Running agents：帶當下的 round + tokens；也 merge 上一次任務資訊
+  runningItems.forEach((id) => {
+    const item = items.find((i) => i.id === id)
+    if (!item) return
+    running.push(item.name)
+    const cur = getCurrentTaskInfo(id)
+    const last = lastTaskByAgent.get(item.name)
+    const entry: AgentTaskDetail = { ...(last ?? {}) }
+    if (cur) {
+      entry.currentRound = cur.currentRound
+      entry.currentTokens = cur.currentTokens
+    }
+    const execId = currentExecIdByItem.get(id)
+    if (execId) entry.currentExecId = execId
+    detail[item.name] = entry
+  })
+
+  itemTaskQueues.forEach((q, id) => {
+    const item = items.find((i) => i.id === id)
+    if (item && q.length > 0) queued[item.name] = q.length
+  })
+
+  // 沒在跑的 agent 也把最後一次結果帶上
+  lastTaskByAgent.forEach((info, name) => {
+    if (!detail[name]) detail[name] = { ...info }
+  })
+
+  void invoke('update_agent_status', { running, queued, detail }).catch(() => {})
+}
+
 interface QueuedTask {
   parameters?: unknown
   enqueuedAt: number
+  execId?: string
 }
 
 /** 每個 item 各自的 FIFO 任務佇列 */
@@ -339,6 +424,8 @@ function recordModelExchange(exchange: ModelExchangeEvent): void {
         timestamp: now + 0.5,
       })
     }
+    // 也同步一次 status，讓 HTTP get_status 能拿到最新的 round + 累積 tokens
+    syncAgentStatus()
   }
 
   // 同步紀錄到 session exchanges
@@ -384,6 +471,16 @@ const emptyState = document.getElementById('empty-state') as HTMLElement
 const settingsOverlay = document.getElementById('settings-overlay') as HTMLElement
 const btnCloseDialog = document.getElementById('btn-close-dialog') as HTMLButtonElement
 const inputName = document.getElementById('input-name') as HTMLInputElement
+const inputAgentId = document.getElementById('input-agent-id') as HTMLInputElement
+const btnCopyAgentId = document.getElementById('btn-copy-agent-id') as HTMLButtonElement
+btnCopyAgentId?.addEventListener('click', () => {
+  if (!inputAgentId.value) return
+  void navigator.clipboard.writeText(inputAgentId.value).then(() => {
+    const prev = btnCopyAgentId.textContent
+    btnCopyAgentId.textContent = '✓ 已複製'
+    setTimeout(() => { btnCopyAgentId.textContent = prev }, 1200)
+  })
+})
 const inputPrompt = document.getElementById('input-prompt') as HTMLTextAreaElement
 const inputApiBaseUrl = document.getElementById('input-api-base-url') as HTMLInputElement
 const inputApiKey = document.getElementById('input-api-key') as HTMLInputElement
@@ -516,22 +613,19 @@ function createItemCard(item: ListItem): HTMLElement {
   info.appendChild(nameEl)
   info.appendChild(metaEl)
 
-  // 執行按鈕
+  // 執行狀態的轉圈圈（放在按鈕左邊；running=1 + queued=N 個）
+  const spinners = document.createElement('span')
+  spinners.className = 'run-spinners'
+  renderSpinners(spinners, item.id)
+
+  // 執行按鈕（永遠是 ▶️，即使在跑也能按 → 進 queue）
   const runBtn = document.createElement('button')
   runBtn.className = 'btn-run'
-  if (runningItems.has(item.id)) {
-    const queuedCount = itemTaskQueues.get(item.id)?.length ?? 0
-    runBtn.innerHTML = '⏳'
-    runBtn.title = queuedCount > 0 ? `等待模型回應（Queue：${queuedCount}）` : '等待模型回應'
-    runBtn.classList.add('running')
-    runBtn.disabled = true
-  } else {
-    runBtn.innerHTML = '▶️'
-    runBtn.title = '執行'
-  }
+  runBtn.innerHTML = '▶️'
+  runBtn.title = runningItems.has(item.id) ? '再按會加入 Queue' : '執行'
   runBtn.addEventListener('click', (e) => {
     e.stopPropagation()
-    if (!runningItems.has(item.id)) void runItem(item.id)
+    void runItem(item.id)
   })
 
   // 右側：齒輪按鈕
@@ -574,10 +668,94 @@ function createItemCard(item: ListItem): HTMLElement {
     card.appendChild(mappingIcon)
   }
   card.appendChild(info)
+  card.appendChild(spinners)
   card.appendChild(runBtn)
   card.appendChild(gearBtn)
 
   return card
+}
+
+/** 依 running + queue 狀態填入 N 個轉圈圈 icon（running=1 + queued=N） */
+function renderSpinners(container: HTMLElement, id: number): void {
+  const running = runningItems.has(id) ? 1 : 0
+  const queued = itemTaskQueues.get(id)?.length ?? 0
+  const total = running + queued
+  container.innerHTML = ''
+  container.title = ''
+  for (let i = 0; i < total; i++) {
+    const s = document.createElement('span')
+    const isActive = i === 0 && running > 0
+    s.className = isActive ? 'run-spinner active' : 'run-spinner queued'
+    s.title = isActive ? '執行中' : '等待中（點擊可取消）'
+    if (!isActive) {
+      // 排隊 icon：可點開下拉選單取消該項
+      const queueIdx = i - running  // 0-based in queue array
+      s.classList.add('clickable')
+      s.addEventListener('click', (e) => {
+        e.stopPropagation()
+        openQueueItemMenu(s, id, queueIdx)
+      })
+    }
+    container.appendChild(s)
+  }
+}
+
+/** 在指定 spinner 附近彈出「取消」下拉選單 */
+function openQueueItemMenu(anchor: HTMLElement, itemId: number, queueIdx: number): void {
+  // 關掉現存的任何 menu
+  document.querySelectorAll('.queue-item-menu').forEach((el) => el.remove())
+
+  const menu = document.createElement('div')
+  menu.className = 'queue-item-menu'
+  const cancelBtn = document.createElement('button')
+  cancelBtn.className = 'queue-item-menu-btn'
+  cancelBtn.textContent = '✕ 取消此任務'
+  cancelBtn.addEventListener('click', (e) => {
+    e.stopPropagation()
+    cancelQueuedTask(itemId, queueIdx)
+    menu.remove()
+  })
+  menu.appendChild(cancelBtn)
+
+  // 定位：spinner 下方
+  const rect = anchor.getBoundingClientRect()
+  menu.style.position = 'fixed'
+  menu.style.left = rect.left + 'px'
+  menu.style.top = (rect.bottom + 4) + 'px'
+  document.body.appendChild(menu)
+
+  // 點 menu 以外的地方關掉
+  const closeOnOutside = (e: MouseEvent) => {
+    if (!menu.contains(e.target as Node)) {
+      menu.remove()
+      document.removeEventListener('mousedown', closeOnOutside)
+    }
+  }
+  // 用 setTimeout 讓當前 click 事件先跑完，避免馬上被關掉
+  setTimeout(() => document.addEventListener('mousedown', closeOnOutside), 0)
+}
+
+/** 從指定 item 的 queue 中移除第 idx 個任務 */
+function cancelQueuedTask(itemId: number, idx: number): void {
+  const queue = itemTaskQueues.get(itemId)
+  if (!queue || idx < 0 || idx >= queue.length) return
+  queue.splice(idx, 1)
+  if (queue.length === 0) itemTaskQueues.delete(itemId)
+  const logs = itemLogs.get(itemId) ?? []
+  logs.push({
+    level: 'system',
+    message: `🚫 已取消 Queue 第 ${idx + 1} 個排隊任務（剩餘 ${queue.length} 項）`,
+    timestamp: Date.now(),
+  })
+  itemLogs.set(itemId, logs)
+  syncAgentStatus()
+  // 重繪這張 card 的 spinner；也刷新 message box 讓 log 立即顯示
+  const card = document.querySelector(`.item-card[data-id="${itemId}"]`) as HTMLElement | null
+  if (card) {
+    const spinners = card.querySelector('.run-spinners') as HTMLElement | null
+    if (spinners) renderSpinners(spinners, itemId)
+  }
+  if (selectedItemId === itemId && viewingSessionData === null) renderMessageBox(itemId)
 }
 
 /** 格式化卡片下方的副資訊 */
@@ -629,7 +807,7 @@ function selectItem(id: number): void {
 }
 
 /** 呼叫指定 item 設定的模型 API */
-async function runItem(id: number, parameters?: unknown): Promise<void> {
+async function runItem(id: number, parameters?: unknown, execId?: string): Promise<void> {
   const item = items.find((i) => i.id === id)
   if (!item) return
 
@@ -641,8 +819,9 @@ async function runItem(id: number, parameters?: unknown): Promise<void> {
     if (queue.length >= MAX_QUEUED_TASKS_PER_ITEM) {
       queueLogs.push({ level: 'error', message: `Queue 已達上限 ${MAX_QUEUED_TASKS_PER_ITEM}，拒絕新任務`, timestamp: Date.now() })
     } else {
-      queue.push({ parameters, enqueuedAt: Date.now() })
+      queue.push({ parameters, enqueuedAt: Date.now(), execId })
       itemTaskQueues.set(id, queue)
+      syncAgentStatus()
       queueLogs.push({
         level: 'info',
         message: `新任務已加入 Queue，排隊順位：${queue.length}${parameters !== undefined ? `\n參數：${JSON.stringify(parameters)}` : ''}`,
@@ -748,7 +927,14 @@ async function runItem(id: number, parameters?: unknown): Promise<void> {
   }
 
   runningItems.add(id)
+  if (execId) currentExecIdByItem.set(id, execId)
+  else currentExecIdByItem.delete(id)
+  syncAgentStatus()
   updateCardRunButton(id, true)
+
+  // 追蹤此次執行結果，供 finally 建立 lastTaskByAgent 條目使用
+  let taskSuccess = false
+  let taskContent = ''
 
   try {
     const result = await invoke<AgentExecutionResult>('execute_agent', {
@@ -774,8 +960,12 @@ async function runItem(id: number, parameters?: unknown): Promise<void> {
     })
     logs.push({ level: 'success', message: `模型端點：${result.endpoint}`, timestamp: Date.now() })
     logs.push({ level: 'system', message: result.content, html: renderMarkdownSafe(result.content), timestamp: Date.now() + 1 })
+    taskSuccess = true
+    taskContent = result.content ?? ''
   } catch (error) {
     logs.push({ level: 'error', message: `模型請求失敗：${String(error)}`, timestamp: Date.now() })
+    taskSuccess = false
+    taskContent = String(error)
   } finally {
     // 統整 token 用量（每輪 + 總計），在結束分隔線之前顯示
     const summary = summarizeSessionTokens(id)
@@ -790,15 +980,36 @@ async function runItem(id: number, parameters?: unknown): Promise<void> {
     }
     logs.push({ level: 'system', message: `══════ Agent「${item.name}」執行結束 ══════`, timestamp: Date.now() + 1 })
     runningItems.delete(id)
-    updateCardRunButton(id, false)
-    if (selectedItemId === id && viewingSessionData === null) renderMessageBox(id)
-
-    // 儲存本次 session
-    void saveCurrentSession(item)
-
+    // 記錄此次任務結果（下次 sync 會帶到 lastEndedAt / lastSuccess / lastTokens…）
+    const finishedExecId = currentExecIdByItem.get(id)
+    currentExecIdByItem.delete(id)
+    lastTaskByAgent.set(item.name, {
+      lastEndedAt: Date.now(),
+      lastSuccess: taskSuccess,
+      lastContentPreview: taskContent.length > 200 ? taskContent.slice(0, 200) + '…' : taskContent,
+      lastTokens: summary.total.total,
+      lastRounds: summary.rounds.length,
+      lastExecId: finishedExecId,
+    })
     const queue = itemTaskQueues.get(id)
     const nextTask = queue?.shift()
     if (queue && queue.length === 0) itemTaskQueues.delete(id)
+    // 立即同步狀態到 Rust，讓 HTTP action=get_status 能查到最新狀態。
+    // 這行放在後面的 UI 更新/saveSession 之前，避免那些操作意外拋錯導致狀態未同步。
+    syncAgentStatus()
+    updateCardRunButton(id, false)
+    if (selectedItemId === id && viewingSessionData === null) renderMessageBox(id)
+
+    // 儲存本次 session，並把路徑補進 lastTaskByAgent，讓 status 能提供 session link
+    void saveCurrentSession(item).then((savedPath) => {
+      if (savedPath) {
+        const info = lastTaskByAgent.get(item.name) ?? {}
+        info.lastSessionPath = savedPath
+        info.lastSessionUrl = `http://127.0.0.1:37123/session_file?path=${encodeURIComponent(savedPath)}`
+        lastTaskByAgent.set(item.name, info)
+        syncAgentStatus()  // 再同步一次，讓 status 帶到 sessionPath / sessionUrl
+      }
+    })
     if (nextTask) {
       logs.push({
         level: 'system',
@@ -806,7 +1017,7 @@ async function runItem(id: number, parameters?: unknown): Promise<void> {
         timestamp: Date.now(),
       })
       if (selectedItemId === id && viewingSessionData === null) renderMessageBox(id)
-      void runItem(id, nextTask.parameters)
+      void runItem(id, nextTask.parameters, nextTask.execId)
     }
   }
 }
@@ -818,16 +1029,18 @@ async function drainHttpInputs(): Promise<void> {
   try {
     const pending = await invoke<HttpInput[]>('take_http_inputs')
     pending.forEach((input) => {
-      const item = items.find((candidate) => itemNameKey(candidate.name) === itemNameKey(input.agent))
+      // 優先用穩定 agentId 找項目；若沒帶就退回用名字比對（backward compat）
+      const item = (input.agentId && items.find((c) => c.agentId === input.agentId))
+        || items.find((c) => itemNameKey(c.name) === itemNameKey(input.agent))
       if (!item) {
-        console.warn(`找不到名稱為「${input.agent}」的項目`)
+        console.warn(`找不到 agentId「${input.agentId ?? ''}」或名稱「${input.agent}」的項目`)
         return
       }
       if (!item.allowHttp) {
         console.warn(`項目「${item.name}」未啟用 HTTP 接收功能`)
         return
       }
-      void runItem(item.id, input.parameters)
+      void runItem(item.id, input.parameters, input.execId)
     })
   } catch (error) {
     console.error('讀取 HTTP 輸入失敗', error)
@@ -839,21 +1052,18 @@ function updateCardRunButton(id: number, running: boolean): void {
   const card = document.querySelector(`.item-card[data-id="${id}"]`) as HTMLElement | null
   if (!card) return
 
+  const spinners = card.querySelector('.run-spinners') as HTMLElement | null
+  if (spinners) renderSpinners(spinners, id)
+
   const btn = card.querySelector('.btn-run') as HTMLButtonElement | null
   if (!btn) return
 
+  // 按鈕本身不再變沙漏／禁用，僅更新 tooltip 與 card class
+  btn.innerHTML = '▶️'
+  btn.title = running ? '再按會加入 Queue' : '執行'
   if (running) {
-    const queuedCount = itemTaskQueues.get(id)?.length ?? 0
-    btn.innerHTML = '⏳'
-    btn.title = queuedCount > 0 ? `等待模型回應（Queue：${queuedCount}）` : '等待模型回應'
-    btn.classList.add('running')
-    btn.disabled = true
     card.classList.add('has-running-agent')
   } else {
-    btn.innerHTML = '▶️'
-    btn.title = '執行'
-    btn.classList.remove('running')
-    btn.disabled = false
     card.classList.remove('has-running-agent')
   }
 }
@@ -1119,8 +1329,8 @@ function formatSessionTimestamp(date: Date): string {
 }
 
 /** 儲存本次執行的 session 到檔案 */
-async function saveCurrentSession(item: ListItem): Promise<void> {
-  if (!isTauri()) return
+async function saveCurrentSession(item: ListItem): Promise<string | null> {
+  if (!isTauri()) return null
   const logs = itemLogs.get(item.id) ?? []
   const exchanges = currentSessionExchanges.get(item.id)
   if (!exchanges || exchanges.length === 0) {
@@ -1130,13 +1340,16 @@ async function saveCurrentSession(item: ListItem): Promise<void> {
       timestamp: Date.now(),
     })
     if (selectedItemId === item.id && viewingSessionData === null) renderMessageBox(item.id)
-    return
+    return null
   }
 
   const startedAt = currentSessionStartedAt.get(item.id) ?? Date.now()
   const endedAt = Date.now()
   const now = new Date(endedAt)
   const sessionId = `session_${formatSessionTimestamp(now)}`
+  const savedPath = item.workingDirectory
+    ? `${item.workingDirectory}\\.ListAgent\\session\\${sessionId}.json`
+    : `~/.listagent/sessions/${item.code}/${sessionId}.json`
 
   const session: SessionData = {
     sessionId,
@@ -1158,7 +1371,7 @@ async function saveCurrentSession(item: ListItem): Promise<void> {
     })
     logs.push({
       level: 'info',
-      message: `💾 Session 已儲存：${item.workingDirectory ? `${item.workingDirectory}\\.ListAgent\\session\\` : '~/.listagent/sessions/'}${sessionId}.json`,
+      message: `💾 Session 已儲存：${savedPath}`,
       timestamp: Date.now(),
     })
 
@@ -1166,6 +1379,7 @@ async function saveCurrentSession(item: ListItem): Promise<void> {
     if (selectedItemId === item.id) {
       await loadAndRenderSessions(item)
     }
+    return savedPath
   } catch (error) {
     console.error('儲存 session 失敗', error)
     logs.push({
@@ -1174,6 +1388,7 @@ async function saveCurrentSession(item: ListItem): Promise<void> {
       timestamp: Date.now(),
     })
     if (selectedItemId === item.id && viewingSessionData === null) renderMessageBox(item.id)
+    return null
   }
 }
 
@@ -1953,6 +2168,7 @@ async function openSettingsDialog(itemId: number): Promise<void> {
 
   // 填入目前值
   inputName.value = item.name
+  inputAgentId.value = item.agentId
   inputPrompt.value = item.prompt
   inputApiBaseUrl.value = item.apiBaseUrl
   inputApiKey.value = item.apiKey
@@ -2050,6 +2266,7 @@ btnAdd.addEventListener('click', async () => {
   const newItem: ListItem = {
     id: newId,
     code: itemCodeFromId(newId),
+    agentId: generateAgentId(),
     name: generateDefaultItemName(),
     prompt: '',
     apiBaseUrl: '',

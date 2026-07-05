@@ -20,9 +20,75 @@ const MAX_SEARCH_RESULTS: usize = 200;
 #[derive(Debug, Serialize, Deserialize, Clone)]
 #[serde(rename_all = "camelCase")]
 pub struct HttpInput {
-    pub agent: String,
+    #[serde(default)]
+    pub agent: String,             // Item name (backward compat / human-readable)
+    #[serde(default, rename = "agentId")]
+    pub agent_id: String,          // Stable, unique per-item identifier (preferred)
+    #[serde(default)]
+    pub action: String,            // "run" (default) | "get_status" | "list_agents"
+    #[serde(default, rename = "execId")]
+    pub exec_id: String,           // Client-supplied ID for correlating request → agent execution
     #[serde(default, alias = "params", alias = "input")]
     pub parameters: Value,
+}
+
+#[derive(Debug, Clone, Default, Serialize, Deserialize)]
+pub struct AgentTaskDetail {
+    #[serde(rename = "currentRound", skip_serializing_if = "Option::is_none", default)]
+    pub current_round: Option<u32>,
+    #[serde(rename = "currentTokens", skip_serializing_if = "Option::is_none", default)]
+    pub current_tokens: Option<u64>,
+    #[serde(rename = "lastEndedAt", skip_serializing_if = "Option::is_none", default)]
+    pub last_ended_at: Option<u64>,
+    #[serde(rename = "lastSuccess", skip_serializing_if = "Option::is_none", default)]
+    pub last_success: Option<bool>,
+    #[serde(rename = "lastContentPreview", skip_serializing_if = "Option::is_none", default)]
+    pub last_content_preview: Option<String>,
+    #[serde(rename = "lastTokens", skip_serializing_if = "Option::is_none", default)]
+    pub last_tokens: Option<u64>,
+    #[serde(rename = "lastRounds", skip_serializing_if = "Option::is_none", default)]
+    pub last_rounds: Option<u32>,
+    #[serde(rename = "currentExecId", skip_serializing_if = "Option::is_none", default)]
+    pub current_exec_id: Option<String>,
+    #[serde(rename = "lastExecId", skip_serializing_if = "Option::is_none", default)]
+    pub last_exec_id: Option<String>,
+    #[serde(rename = "lastSessionPath", skip_serializing_if = "Option::is_none", default)]
+    pub last_session_path: Option<String>,
+    #[serde(rename = "lastSessionUrl", skip_serializing_if = "Option::is_none", default)]
+    pub last_session_url: Option<String>,
+}
+
+#[derive(Debug, Clone, Default, Serialize)]
+pub struct AgentStatusSnapshot {
+    pub running: Vec<String>,                 // agent names currently running
+    pub queued: HashMap<String, u32>,         // agent name → queue length
+    #[serde(default)]
+    pub detail: HashMap<String, AgentTaskDetail>,  // agent name → task detail
+    #[serde(rename = "updatedAt")]
+    pub updated_at: u64,
+}
+
+fn agent_status() -> &'static std::sync::Mutex<AgentStatusSnapshot> {
+    static INSTANCE: std::sync::OnceLock<std::sync::Mutex<AgentStatusSnapshot>> = std::sync::OnceLock::new();
+    INSTANCE.get_or_init(|| std::sync::Mutex::new(AgentStatusSnapshot::default()))
+}
+
+#[tauri::command]
+fn update_agent_status(
+    running: Vec<String>,
+    queued: HashMap<String, u32>,
+    detail: HashMap<String, AgentTaskDetail>,
+) {
+    let updated_at = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_millis() as u64)
+        .unwrap_or(0);
+    if let Ok(mut s) = agent_status().lock() {
+        s.running = running;
+        s.queued = queued;
+        s.detail = detail;
+        s.updated_at = updated_at;
+    }
 }
 
 #[derive(Clone, Default)]
@@ -135,6 +201,8 @@ fn emit_model_exchange(
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct ListItem {
     pub id: u32,
+    #[serde(default, rename = "agentId")]
+    pub agent_id: String,
     pub name: String,
     pub prompt: String,
     #[serde(rename = "apiBaseUrl")]
@@ -2528,7 +2596,10 @@ fn parse_get_input(request_path: &str) -> Result<HttpInput, String> {
         .split_once('?')
         .map(|(_, query)| query)
         .ok_or_else(|| "GET /input 必須包含 query string".to_string())?;
-    let mut agent = None;
+    let mut agent = String::new();
+    let mut agent_id = String::new();
+    let mut action = String::new();
+    let mut exec_id = String::new();
     let mut parameters = serde_json::Map::new();
 
     for pair in query.split('&').filter(|pair| !pair.is_empty()) {
@@ -2536,9 +2607,12 @@ fn parse_get_input(request_path: &str) -> Result<HttpInput, String> {
         let key = decode_query_component(raw_key)?;
         let value = decode_query_component(raw_value)?;
 
-        if key == "agent" {
-            agent = Some(value);
-            continue;
+        match key.as_str() {
+            "agent"    => { agent = value; continue; }
+            "agent_id" | "agentId" => { agent_id = value; continue; }
+            "action"   => { action = value; continue; }
+            "exec_id" | "execId" => { exec_id = value; continue; }
+            _ => {}
         }
 
         match parameters.get_mut(&key) {
@@ -2554,14 +2628,17 @@ fn parse_get_input(request_path: &str) -> Result<HttpInput, String> {
     }
 
     Ok(HttpInput {
-        agent: agent.ok_or_else(|| "GET /input 缺少 agent 參數".to_string())?,
+        agent,
+        agent_id,
+        action,
+        exec_id,
         parameters: Value::Object(parameters),
     })
 }
 
 fn parse_post_input(body: &[u8]) -> Result<HttpInput, String> {
     let value: Value = serde_json::from_slice(body)
-        .map_err(|_| "body 必須是有效的 JSON，並包含 agent".to_string())?;
+        .map_err(|_| "body 必須是有效的 JSON".to_string())?;
     let mut object = value
         .as_object()
         .cloned()
@@ -2569,13 +2646,27 @@ fn parse_post_input(body: &[u8]) -> Result<HttpInput, String> {
     let agent = object
         .remove("agent")
         .and_then(|value| value.as_str().map(str::to_string))
-        .ok_or_else(|| "body 缺少字串欄位 agent".to_string())?;
+        .unwrap_or_default();
+    let agent_id = object
+        .remove("agent_id")
+        .or_else(|| object.remove("agentId"))
+        .and_then(|value| value.as_str().map(str::to_string))
+        .unwrap_or_default();
+    let action = object
+        .remove("action")
+        .and_then(|value| value.as_str().map(str::to_string))
+        .unwrap_or_default();
+    let exec_id = object
+        .remove("exec_id")
+        .or_else(|| object.remove("execId"))
+        .and_then(|value| value.as_str().map(str::to_string))
+        .unwrap_or_default();
     let parameters = object
         .remove("parameters")
         .or_else(|| object.remove("params"))
         .or_else(|| object.remove("input"))
         .unwrap_or(Value::Object(object));
-    Ok(HttpInput { agent, parameters })
+    Ok(HttpInput { agent, agent_id, action, exec_id, parameters })
 }
 
 fn handle_http_connection(
@@ -2644,6 +2735,39 @@ fn handle_http_connection(
     }
     if method == "GET" && endpoint == "/health" {
         write_http_response(&mut stream, "200 OK", r#"{"status":"ok"}"#);
+        return;
+    }
+    // GET /session_file?path=... — 讀取 session JSON 檔（含安全性檢查）
+    if endpoint == "/session_file" && method == "GET" {
+        let query = path.split_once('?').map(|(_, q)| q).unwrap_or("");
+        let mut req_path = String::new();
+        for pair in query.split('&').filter(|p| !p.is_empty()) {
+            let (raw_key, raw_value) = pair.split_once('=').unwrap_or((pair, ""));
+            if let (Ok(key), Ok(value)) = (decode_query_component(raw_key), decode_query_component(raw_value)) {
+                if key == "path" { req_path = value; break; }
+            }
+        }
+        if req_path.is_empty() {
+            write_http_response(&mut stream, "400 Bad Request", r#"{"error":"缺少 path 參數"}"#);
+            return;
+        }
+        // 安全：只允許讀取 .json 且路徑包含 ".ListAgent/session" 或 ".listagent/sessions"
+        let looks_like_session = req_path.ends_with(".json")
+            && (req_path.contains(".ListAgent/session")
+                || req_path.contains(".ListAgent\\session")
+                || req_path.contains(".listagent/sessions")
+                || req_path.contains(".listagent\\sessions"));
+        if !looks_like_session {
+            write_http_response(&mut stream, "403 Forbidden", r#"{"error":"僅允許讀取 session 目錄下的 .json 檔"}"#);
+            return;
+        }
+        match fs::read_to_string(&req_path) {
+            Ok(content) => write_http_response(&mut stream, "200 OK", &content),
+            Err(error) => {
+                let response = serde_json::json!({ "error": error.to_string() }).to_string();
+                write_http_response(&mut stream, "404 Not Found", &response);
+            }
+        }
         return;
     }
     let json_file_path: Option<PathBuf> = match endpoint {
@@ -2719,11 +2843,74 @@ fn handle_http_connection(
         }
     };
     input.agent = input.agent.trim().to_string();
+    input.agent_id = input.agent_id.trim().to_string();
+    let action = {
+        let a = input.action.trim();
+        if a.is_empty() { "run".to_string() } else { a.to_string() }
+    };
+
+    // Resolve agent name from agent_id if provided (via settings lookup)
+    if !input.agent_id.is_empty() && input.agent.is_empty() {
+        if let Ok(settings) = read_settings() {
+            if let Some(item) = settings.items.iter().find(|it| it.agent_id == input.agent_id) {
+                input.agent = item.name.clone();
+            }
+        }
+    }
+
+    // action=list_agents: 回傳 App 裡所有 items 的 { agentId, name }
+    if action == "list_agents" {
+        let items: Vec<ListItem> = read_settings().map(|s| s.items).unwrap_or_default();
+        let list: Vec<Value> = items.iter().map(|it| {
+            serde_json::json!({
+                "agentId": it.agent_id,
+                "name": it.name,
+                "allowHttp": it.allow_http,
+            })
+        }).collect();
+        write_http_response(&mut stream, "200 OK", &serde_json::json!({ "agents": list }).to_string());
+        return;
+    }
+
+    // action=get_status doesn't run anything — just returns current agent state.
+    if action == "get_status" {
+        let snapshot = agent_status().lock().map(|s| s.clone()).unwrap_or_default();
+        let filtered = if input.agent.is_empty() {
+            serde_json::json!({
+                "running": snapshot.running,
+                "queued": snapshot.queued,
+                "detail": snapshot.detail,
+                "updatedAt": snapshot.updated_at
+            })
+        } else {
+            let name = &input.agent;
+            let detail = snapshot.detail.get(name).cloned().unwrap_or_default();
+            serde_json::json!({
+                "agent": name,
+                "agentId": input.agent_id,
+                "running": snapshot.running.iter().any(|n| n == name),
+                "queued": snapshot.queued.get(name).copied().unwrap_or(0),
+                "detail": detail,
+                "updatedAt": snapshot.updated_at
+            })
+        };
+        write_http_response(&mut stream, "200 OK", &filtered.to_string());
+        return;
+    }
+
+    if action != "run" {
+        let response = serde_json::json!({
+            "error": format!("未知的 action：{action}（支援：run, get_status, list_agents）")
+        }).to_string();
+        write_http_response(&mut stream, "400 Bad Request", &response);
+        return;
+    }
+
     if input.agent.is_empty() || input.agent.chars().count() > 200 {
         write_http_response(
             &mut stream,
             "400 Bad Request",
-            r#"{"error":"agent 必須是 1 至 200 字元的項目名稱"}"#,
+            r#"{"error":"必須提供 agent（項目名稱）或 agent_id（找不到對應項目）"}"#,
         );
         return;
     }
@@ -2743,7 +2930,12 @@ fn handle_http_connection(
     }
 
     let _ = app_handle.emit("http-input-available", ());
-    let response = serde_json::json!({ "accepted": true, "agent": input.agent }).to_string();
+    let response = serde_json::json!({
+        "accepted": true,
+        "agent": input.agent,
+        "agentId": input.agent_id,
+        "action": action
+    }).to_string();
     write_http_response(&mut stream, "202 Accepted", &response);
 }
 
@@ -2933,7 +3125,8 @@ pub fn run() {
             list_sessions,
             read_session_file,
             list_skills,
-            list_mcp_server_tools
+            list_mcp_server_tools,
+            update_agent_status
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

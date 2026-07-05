@@ -510,6 +510,79 @@ body {
   50%      { box-shadow: 0 0 0 8px rgba(239, 68, 68, 0); }
 }
 
+/* 執行狀態轉圈圈：running=1 個亮色 + queued=N 個淡色，按鈕左邊排開 */
+.run-spinners {
+  display: inline-flex;
+  gap: 4px;
+  align-items: center;
+  margin-right: 6px;
+  min-height: 14px;
+}
+.run-spinner {
+  width: 18px;
+  height: 18px;
+  border: 2.5px solid transparent;
+  border-radius: 50%;
+  flex-shrink: 0;
+}
+.run-spinner.active {
+  border-color: rgba(129, 140, 248, 0.25);
+  border-top-color: var(--accent, #6366f1);
+  animation: run-spin 0.9s linear infinite;
+}
+.run-spinner.queued {
+  border-color: rgba(148, 163, 184, 0.2);
+  border-top-color: rgba(148, 163, 184, 0.7);
+  /* 排隊中：不轉 */
+}
+@keyframes run-spin {
+  to { transform: rotate(360deg); }
+}
+
+.run-spinner.clickable {
+  cursor: pointer;
+  transition: transform 0.1s;
+}
+.run-spinner.clickable:hover {
+  transform: scale(1.15);
+  border-top-color: rgba(148, 163, 184, 1);
+}
+
+.queue-item-menu {
+  z-index: 1000;
+  background: var(--surface, #1e293b);
+  border: 1px solid var(--border, rgba(255, 255, 255, 0.12));
+  border-radius: 6px;
+  padding: 4px;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.4);
+  min-width: 140px;
+}
+.queue-item-menu-btn {
+  display: block;
+  width: 100%;
+  padding: 6px 10px;
+  background: transparent;
+  border: none;
+  color: var(--text, #e2e8f0);
+  text-align: left;
+  cursor: pointer;
+  font-size: 13px;
+  border-radius: 4px;
+  transition: background 0.1s;
+}
+.queue-item-menu-btn:hover {
+  background: rgba(239, 68, 68, 0.15);
+  color: var(--danger, #ef4444);
+}
+@media (prefers-color-scheme: light) {
+  .queue-item-menu {
+    background: #ffffff;
+    border-color: rgba(0, 0, 0, 0.12);
+    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
+  }
+  .queue-item-menu-btn { color: #1e293b; }
+}
+
 /* 卡片上有 agent 正在執行時的視覺提示 */
 .item-card.has-running-agent {
   border-left: 3px solid var(--accent);

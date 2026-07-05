@@ -134,27 +134,67 @@
     .btn-ghost:hover { background: rgba(255,255,255,0.05); color: var(--text); }
     .history-list { display: flex; flex-direction: column; gap: 4px; }
     .history-item {
-      display: flex; align-items: center; gap: 8px; padding: 6px 8px;
+      display: flex; align-items: flex-start; gap: 8px; padding: 6px 8px;
       border-radius: 5px; background: var(--bg); font-size: 11px;
       font-family: var(--mono); cursor: pointer; border: 1px solid transparent;
       transition: border-color 0.15s;
     }
     .history-item:hover { border-color: var(--border); }
-    .h-time { color: var(--muted); flex-shrink: 0; }
+    .h-time { color: var(--muted); flex-shrink: 0; padding-top: 1px; }
     .h-method {
       color: var(--accent); padding: 1px 5px; background: var(--accent-light);
-      border-radius: 3px; flex-shrink: 0; font-size: 10px;
+      border-radius: 3px; flex-shrink: 0; font-size: 10px; margin-top: 1px;
     }
-    .h-url { color: var(--accent); flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .h-url { color: var(--accent); flex: 1; overflow: hidden; }
+    .h-url .url-raw,
+    .autolist-item .a-url .url-raw { display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+    .h-url .url-decoded,
+    .autolist-item .a-url .url-decoded {
+      display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+      color: var(--muted); font-size: 10px; margin-top: 2px;
+    }
+    .autolist-item .a-url .url-agent {
+      display: block; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+      color: var(--text); font-size: 11px; margin-top: 3px; font-family: var(--sans);
+      font-weight: 600;
+    }
     .autolist { display: flex; flex-direction: column; gap: 4px; }
     .autolist-item {
-      display: flex; align-items: center; gap: 8px; padding: 6px 8px;
+      display: flex; flex-direction: column; padding: 6px 8px;
       border-radius: 5px; background: var(--bg); font-size: 11px;
       font-family: var(--mono); border: 1px solid transparent;
       transition: border-color 0.15s;
     }
     .autolist-item:hover { border-color: var(--border); }
-    .autolist-item .a-url { color: var(--accent); flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; cursor: pointer; }
+    .autolist-row { display: flex; align-items: flex-start; gap: 8px; }
+    .autolist-detail {
+      margin-top: 8px;
+      padding: 10px 12px;
+      background: rgba(255,255,255,0.03);
+      border-left: 3px solid var(--accent);
+      border-radius: 4px;
+      font-size: 11px;
+      line-height: 1.6;
+      color: var(--text);
+      max-height: 400px;
+      overflow-y: auto;
+    }
+    .autolist-detail.hidden { display: none; }
+    .autolist-detail .d-section { margin-bottom: 8px; }
+    .autolist-detail .d-section:last-child { margin-bottom: 0; }
+    .autolist-detail .d-title {
+      font-size: 10px; font-weight: 700; text-transform: uppercase;
+      color: var(--muted); letter-spacing: 0.4px; margin-bottom: 3px;
+    }
+    .autolist-detail .d-row { display: flex; gap: 6px; align-items: baseline; }
+    .autolist-detail .d-label { color: var(--muted); flex-shrink: 0; min-width: 88px; }
+    .autolist-detail .d-value { color: var(--text); word-break: break-all; }
+    .autolist-detail .d-preview {
+      background: var(--bg); border-radius: 4px; padding: 6px 8px; margin-top: 4px;
+      white-space: pre-wrap; font-family: var(--sans); color: var(--text);
+    }
+    .autolist-detail a.d-link { color: var(--accent); text-decoration: underline; }
+    .autolist-item .a-url { color: var(--accent); flex: 1; overflow: hidden; cursor: pointer; }
     .autolist-item .a-del,
     .autolist-item .a-run {
       color: var(--muted); background: transparent; border: none;
@@ -166,6 +206,14 @@
     .autolist-item .a-status.ok  { background: rgba(134,239,172,0.15); color: var(--success); }
     .autolist-item .a-status.err { background: rgba(252,165,165,0.15); color: var(--error); }
     .autolist-item .a-status.pending { background: rgba(253,230,138,0.15); color: var(--warn); }
+    .autolist-item .a-agent-status {
+      font-size: 10px; font-family: var(--mono); padding: 1px 6px; border-radius: 8px; flex-shrink: 0;
+      background: rgba(255,255,255,0.05); color: var(--muted);
+    }
+    .autolist-item .a-agent-status.running { background: rgba(134,239,172,0.15); color: var(--success); }
+    .autolist-item .a-agent-status.queued  { background: rgba(253,230,138,0.15); color: var(--warn); }
+    .autolist-item .a-agent-status.idle    { background: rgba(255,255,255,0.05); color: var(--muted); }
+    .autolist-item .a-agent-status.err     { background: rgba(252,165,165,0.15); color: var(--error); }
     .autolist-empty { color: var(--muted); font-size: 12px; padding: 6px 8px; }
   </style>
 </head>
@@ -177,6 +225,7 @@
       <summary class="card-title">Health Check</summary>
       <div class="row">
         <button class="btn btn-primary" id="btn-health">GET /health</button>
+        <button class="btn btn-secondary" id="btn-status">📊 查詢 Agent 狀態</button>
       </div>
       <div class="res-header" id="health-header"></div>
       <div class="response-box" id="health-res">（尚未送出）</div>
@@ -187,7 +236,10 @@
   <div class="card">
     <div class="card-title-row">
       <div class="card-title">AUTO LIST</div>
-      <button class="btn-ghost" id="btn-autolist-run-all">▶ 全部執行</button>
+      <div style="display:flex;gap:6px">
+        <button class="btn-ghost" id="btn-autolist-refresh-status">🔄 更新狀態</button>
+        <button class="btn-ghost" id="btn-autolist-run-all">▶ 全部執行</button>
+      </div>
     </div>
     <div class="autolist" id="autolist"></div>
   </div>
@@ -203,9 +255,13 @@
     <!-- GET Panel -->
     <div id="panel-get" class="panel active">
       <div class="row">
-        <div class="field">
-          <label>agent（項目名稱）</label>
-          <input id="get-agent" type="text" placeholder="例如：項目 1" />
+        <div class="field" style="flex:2">
+          <label>agent_id</label>
+          <div style="display:flex;gap:6px;align-items:stretch">
+            <input id="get-agent" type="text" placeholder="例如：ag_a1b2c3d4e5f6" style="flex:1" list="agents-datalist" />
+            <button class="btn btn-secondary" id="btn-fetch-agents" type="button" title="從 ListAgent App 拉取所有 agent 清單">🔄</button>
+          </div>
+          <datalist id="agents-datalist"></datalist>
         </div>
         <div class="field">
           <label>arg1</label>
@@ -246,8 +302,8 @@
     <div id="panel-post" class="panel">
       <div class="row">
         <div class="field">
-          <label>agent（項目名稱）</label>
-          <input id="post-agent" type="text" placeholder="例如：項目 1" />
+          <label>agent_id</label>
+          <input id="post-agent" type="text" placeholder="例如：ag_a1b2c3d4e5f6" list="agents-datalist" />
         </div>
       </div>
       <div class="row">
@@ -291,13 +347,53 @@ let historyLoaded = false
 const autoList = []
 let autoListLoaded = false
 
+// 快取：agent_id → name（由 list_agents 填入，用於解析 auto list item 的 name）
+const agentsById = {}
+
 // ── 工具函式 ──────────────────────────────────────────────────
 
+function escapeHtml(s) {
+  return String(s).replace(/[&<>"']/g, function(c) {
+    return { '&':'&amp;', '<':'&lt;', '>':'&gt;', '"':'&quot;', "'":'&#39;' }[c]
+  })
+}
+
+/** 把 URL 裡的 %XX 序列解碼；失敗（單獨 %）就回原文 */
+function decodeUrlSafe(url) {
+  try { return decodeURI(url) } catch (_) {}
+  try { return decodeURIComponent(url) } catch (_) {}
+  // 手動：整段逐字元試 decodeURIComponent
+  return url.replace(/(?:%[0-9A-Fa-f]{2})+/g, function(seq) {
+    try { return decodeURIComponent(seq) } catch (_) { return seq }
+  })
+}
+
+/** 產生唯一 exec_id：時間戳 + 隨機碼，方便追蹤 request → agent execution */
+function generateExecId() {
+  return 'e' + Date.now().toString(36) + '_' + Math.random().toString(36).slice(2, 8)
+}
+
+/** 把一個現成 URL 的 exec_id 換成新的（沒有就加）；用於 auto list 重跑時 refresh id */
+function urlWithFreshExecId(url) {
+  try {
+    const u = new URL(url)
+    u.searchParams.set('exec_id', generateExecId())
+    return u.toString()
+  } catch (_) {
+    // fallback：簡單處理
+    return url + (url.includes('?') ? '&' : '?') + 'exec_id=' + generateExecId()
+  }
+}
+
 function buildGetUrl() {
-  const agent = document.getElementById('get-agent').value.trim()
-  if (!agent) return null
+  const agentIdOrName = document.getElementById('get-agent').value.trim()
+  if (!agentIdOrName) return null
   const p = new URLSearchParams()
-  p.set('agent', agent)
+  // 若欄位值長得像 agent_id（ag_ 開頭）用 agent_id；否則當作 name（backward compat）
+  if (agentIdOrName.startsWith('ag_')) p.set('agent_id', agentIdOrName)
+  else p.set('agent', agentIdOrName)
+  p.set('action', 'run')
+  p.set('exec_id', generateExecId())
   const a1 = document.getElementById('get-arg1').value.trim()
   const a2 = document.getElementById('get-arg2').value.trim()
   const a3 = document.getElementById('get-arg3').value.trim()
@@ -371,7 +467,14 @@ function loadAutoList() {
   return fetch(AUTOLIST_URL).then(function(r) { return r.json() }).then(function(arr) {
     if (Array.isArray(arr)) {
       autoList.length = 0
-      arr.forEach(function(x) { autoList.push(x) })
+      arr.forEach(function(x) {
+        // 遷移舊資料：若 agent 值是 ag_ 開頭，其實是 agentId
+        if (x.agent && !x.agentId && String(x.agent).startsWith('ag_')) {
+          x.agentId = x.agent
+          x.agent = ''
+        }
+        autoList.push(x)
+      })
     }
     autoListLoaded = true
     renderAutoList()
@@ -389,14 +492,37 @@ function renderAutoList() {
   }
   el.innerHTML = ''
   autoList.forEach(function(item, i) {
+    const container = document.createElement('div')
+    container.className = 'autolist-item'
+    container.dataset.index = String(i)
+
+    // 第一列：URL / agent 徽章 / 執行 / 刪除
     const row = document.createElement('div')
-    row.className = 'autolist-item'
-    row.dataset.index = String(i)
+    row.className = 'autolist-row'
     const url = document.createElement('span')
     url.className = 'a-url'
-    url.textContent = item.url
-    url.title = item.url
+    const decoded = decodeUrlSafe(item.url)
+    const agentName = item.agent || (item.agentId ? agentsById[item.agentId] || '' : '')
+    const agentLabel = agentName
+      ? escapeHtml(agentName) + (item.agentId ? ' <span style="color:var(--muted);font-size:9px">(' + escapeHtml(item.agentId) + ')</span>' : '')
+      : (item.agentId
+          ? '<span style="color:var(--warn)">找不到對應 Agent（' + escapeHtml(item.agentId) + '）</span>'
+          : '<span style="color:var(--muted)">（無 agent 資訊）</span>')
+    url.innerHTML = '<span class="url-raw">' + escapeHtml(item.url) + '</span>' +
+      (decoded !== item.url ? '<span class="url-decoded">' + escapeHtml(decoded) + '</span>' : '') +
+      '<span class="url-agent">👤 ' + agentLabel + '</span>'
+    url.title = item.url + (decoded !== item.url ? '\n\n解碼：' + decoded : '') + (agentName ? '\n\nAgent：' + agentName : '')
     url.addEventListener('click', function() { reuseAutoList(i) })
+    const agentStatus = document.createElement('span')
+    agentStatus.className = 'a-agent-status idle'
+    agentStatus.textContent = 'idle'
+    agentStatus.title = '點擊展開／收合詳細狀態'
+    agentStatus.style.cursor = 'pointer'
+    agentStatus.addEventListener('click', function(e) {
+      e.stopPropagation()
+      const d = container.querySelector('.autolist-detail')
+      if (d) d.classList.toggle('hidden')
+    })
     const status = document.createElement('span')
     status.className = 'a-status'
     status.textContent = ''
@@ -419,10 +545,19 @@ function renderAutoList() {
       renderAutoList()
     })
     row.appendChild(url)
+    row.appendChild(agentStatus)
     row.appendChild(status)
     row.appendChild(run)
     row.appendChild(del)
-    el.appendChild(row)
+
+    // 第二列（預設收合）：詳細狀態卡片
+    const detail = document.createElement('div')
+    detail.className = 'autolist-detail hidden'
+    detail.innerHTML = '<div class="d-title">（尚無狀態資料，請按「🔄 更新狀態」或執行任務）</div>'
+
+    container.appendChild(row)
+    container.appendChild(detail)
+    el.appendChild(container)
   })
 }
 
@@ -438,13 +573,28 @@ function setAutoListStatus(i, cls, text) {
 async function runAutoListItem(i) {
   const item = autoList[i]
   if (!item || !item.url) return
+  // 清空舊的 session link 附加區塊
+  const oldExtra = document.getElementById('input-res-extra')
+  if (oldExtra) oldExtra.remove()
+  // 每次送出前產生新的 exec_id，替換 URL 裡的 exec_id 參數
+  const urlToSend = urlWithFreshExecId(item.url)
+  const uu = new URL(urlToSend)
+  const execId = uu.searchParams.get('exec_id') || ''
+  item.lastExecId = execId
   setAutoListStatus(i, 'pending', '…')
   try {
-    const res = await fetch(item.url)
+    const res = await fetch(urlToSend)
     const text = await res.text()
     setResponse('input-header', 'input-res', res.status, text)
-    addHistory('GET', item.url)
+    addHistory('GET', urlToSend)
     setAutoListStatus(i, res.ok ? 'ok' : 'err', String(res.status))
+    // 啟動 poll 直到 task 完成、附加 session link
+    if (res.ok && execId) {
+      const name = item.agent || (item.agentId ? agentsById[item.agentId] || '' : '')
+      startPollForCompletion(execId, name, item.agentId)
+    }
+    // 送出後立即抓一次狀態（backend 應該已把此 agent 加進 running/queued）
+    if (item.agent || item.agentId) refreshAutoListAgentStatus()
   } catch (err) {
     setNetError('input-header', 'input-res', err)
     setAutoListStatus(i, 'err', 'NET')
@@ -457,16 +607,178 @@ async function runAllAutoList() {
   }
 }
 
+/** 抓所有 auto list 條目的 agent 目前狀態並更新徽章。
+ *  只送一次 GET /input?action=get_status（不帶 agent，回全部 snapshot），
+ *  然後在前端逐項對應。 */
+async function refreshAutoListAgentStatus() {
+  if (autoList.length === 0) return
+  let snapshot
+  try {
+    const res = await fetch(BASE + '/input?action=get_status')
+    if (!res.ok) throw new Error('HTTP ' + res.status)
+    snapshot = await res.json()
+  } catch (err) {
+    // 全部標成 ERR
+    document.querySelectorAll('.autolist-item .a-agent-status').forEach(function(b) {
+      b.classList.remove('running', 'queued', 'idle')
+      b.classList.add('err')
+      b.textContent = 'ERR'
+      b.title = String(err)
+    })
+    return
+  }
+  const runningSet = new Set(Array.isArray(snapshot.running) ? snapshot.running : [])
+  const queuedMap = (snapshot.queued && typeof snapshot.queued === 'object') ? snapshot.queued : {}
+  const detailMap = (snapshot.detail && typeof snapshot.detail === 'object') ? snapshot.detail : {}
+  document.querySelectorAll('.autolist-item').forEach(function(row) {
+    const i = Number(row.dataset.index)
+    const item = autoList[i]
+    if (!item) return
+    const badge = row.querySelector('.a-agent-status')
+    const detailBox = row.querySelector('.autolist-detail')
+    if (!badge) return
+    const name = item.agent || (item.agentId ? agentsById[item.agentId] || '' : '')
+    if (!name) {
+      badge.classList.remove('running', 'queued', 'idle', 'err')
+      badge.classList.add('idle')
+      badge.textContent = item.agentId ? 'id?' : '—'
+      if (detailBox) {
+        detailBox.innerHTML = '<div class="d-title">狀態：找不到對應 Agent</div>' +
+          '<div class="d-row"><span class="d-label">agent_id</span><span class="d-value">' + escapeHtml(item.agentId || '(無)') + '</span></div>' +
+          '<div class="d-section" style="margin-top:6px;color:var(--muted)">此 auto list item 沒有 agent 資訊（按 🔄 更新 agents 清單試試）</div>'
+      }
+      return
+    }
+    const queued = Number(queuedMap[name] || 0)
+    const running = runningSet.has(name)
+    const detail = detailMap[name] || {}
+    badge.classList.remove('running', 'queued', 'idle', 'err')
+    const isMineRunning = !!(item.lastExecId && detail.currentExecId && item.lastExecId === detail.currentExecId)
+    const isMineLast    = !!(item.lastExecId && detail.lastExecId    && item.lastExecId === detail.lastExecId)
+    if (running) {
+      badge.classList.add('running')
+      const parts = ['running']
+      if (isMineRunning) parts.push('★')
+      if (detail.currentRound) parts.push('R' + detail.currentRound)
+      if (detail.currentTokens) parts.push(formatTokens(detail.currentTokens))
+      badge.textContent = parts.join(' ') + (queued > 0 ? ' (+' + queued + ')' : '')
+    } else if (queued > 0) {
+      badge.classList.add('queued')
+      badge.textContent = 'queued ' + queued
+    } else {
+      badge.classList.add('idle')
+      if (detail.lastEndedAt) {
+        const mark = detail.lastSuccess ? '✓' : '✗'
+        const star = isMineLast ? '★' : ''
+        const tokStr = detail.lastTokens ? ' ' + formatTokens(detail.lastTokens) : ''
+        badge.textContent = 'last ' + mark + star + tokStr
+      } else {
+        badge.textContent = 'idle'
+      }
+    }
+    badge.title = '點擊展開／收合詳細狀態'
+    // 更新可摺疊詳細資訊卡（保留展開／收合狀態）
+    if (detailBox) detailBox.innerHTML = buildStatusDetailHtml(name, running, queued, detail, item.lastExecId)
+  })
+}
+
+/** 建立可摺疊卡片的 HTML — 取代原本的 tooltip */
+function buildStatusDetailHtml(agent, running, queued, detail, myExecId) {
+  const rows = []
+  rows.push('<div class="d-section">')
+  rows.push('  <div class="d-title">Agent</div>')
+  rows.push('  <div class="d-row"><span class="d-label">名稱</span><span class="d-value">' + escapeHtml(agent) + '</span></div>')
+  if (myExecId) rows.push('  <div class="d-row"><span class="d-label">本 item exec_id</span><span class="d-value">' + escapeHtml(myExecId) + '</span></div>')
+  rows.push('</div>')
+
+  rows.push('<div class="d-section">')
+  rows.push('  <div class="d-title">目前狀態</div>')
+  if (running) {
+    rows.push('  <div class="d-row"><span class="d-label">狀態</span><span class="d-value" style="color:var(--success)">執行中</span></div>')
+    if (detail.currentRound) rows.push('  <div class="d-row"><span class="d-label">當前 Round</span><span class="d-value">' + detail.currentRound + '</span></div>')
+    if (detail.currentTokens) rows.push('  <div class="d-row"><span class="d-label">累積 tokens</span><span class="d-value">' + detail.currentTokens + '</span></div>')
+    if (detail.currentExecId) {
+      const same = myExecId && detail.currentExecId === myExecId
+      rows.push('  <div class="d-row"><span class="d-label">當前 exec_id</span><span class="d-value">' + escapeHtml(detail.currentExecId) + (same ? ' <span style="color:var(--accent)">★ 本 item</span>' : ' <span style="color:var(--muted)">(其他來源)</span>') + '</span></div>')
+    }
+    if (queued > 0) rows.push('  <div class="d-row"><span class="d-label">後方排隊</span><span class="d-value">' + queued + '</span></div>')
+  } else if (queued > 0) {
+    rows.push('  <div class="d-row"><span class="d-label">狀態</span><span class="d-value" style="color:var(--warn)">排隊中（' + queued + ' 個等待）</span></div>')
+  } else {
+    rows.push('  <div class="d-row"><span class="d-label">狀態</span><span class="d-value" style="color:var(--muted)">idle</span></div>')
+  }
+  rows.push('</div>')
+
+  if (detail.lastEndedAt) {
+    const when = new Date(detail.lastEndedAt).toLocaleString('zh-TW', { hour12: false })
+    rows.push('<div class="d-section">')
+    rows.push('  <div class="d-title">上一次任務</div>')
+    rows.push('  <div class="d-row"><span class="d-label">結束時間</span><span class="d-value">' + when + '</span></div>')
+    rows.push('  <div class="d-row"><span class="d-label">結果</span><span class="d-value" style="color:' + (detail.lastSuccess ? 'var(--success)' : 'var(--error)') + '">' + (detail.lastSuccess ? '成功 ✓' : '失敗 ✗') + '</span></div>')
+    if (detail.lastExecId) {
+      const same = myExecId && detail.lastExecId === myExecId
+      rows.push('  <div class="d-row"><span class="d-label">exec_id</span><span class="d-value">' + escapeHtml(detail.lastExecId) + (same ? ' <span style="color:var(--accent)">★ 本 item</span>' : ' <span style="color:var(--muted)">(其他來源)</span>') + '</span></div>')
+    }
+    if (detail.lastRounds) rows.push('  <div class="d-row"><span class="d-label">Rounds</span><span class="d-value">' + detail.lastRounds + '</span></div>')
+    if (detail.lastTokens) rows.push('  <div class="d-row"><span class="d-label">Tokens</span><span class="d-value">' + detail.lastTokens + '</span></div>')
+    if (detail.lastSessionUrl) {
+      rows.push('  <div class="d-row"><span class="d-label">Session</span><span class="d-value"><a class="d-link" href="' + detail.lastSessionUrl + '" target="_blank">📄 開啟 session JSON</a></span></div>')
+    }
+    if (detail.lastSessionPath) {
+      rows.push('  <div class="d-row"><span class="d-label" style="min-width:auto">&nbsp;</span><span class="d-value" style="font-size:10px;color:var(--muted)">' + escapeHtml(detail.lastSessionPath) + '</span></div>')
+    }
+    if (detail.lastContentPreview) {
+      rows.push('  <div class="d-title" style="margin-top:6px">回覆節錄</div>')
+      rows.push('  <div class="d-preview">' + escapeHtml(detail.lastContentPreview) + '</div>')
+    }
+    rows.push('</div>')
+  }
+  return rows.join('')
+}
+
+/** 12345 → "12.3k"，簡潔顯示 */
+function formatTokens(n) {
+  n = Number(n) || 0
+  if (n >= 1000) return (n / 1000).toFixed(1) + 'k'
+  return String(n)
+}
+
+// 每 3 秒自動輪詢一次 agent 狀態
+let autoListStatusTimer = null
+function startAutoListStatusPolling() {
+  if (autoListStatusTimer) return
+  autoListStatusTimer = setInterval(refreshAutoListAgentStatus, 3000)
+}
+// 頁面切到背景時暫停，回前景時繼續（省網路）
+document.addEventListener('visibilitychange', function() {
+  if (document.hidden) {
+    if (autoListStatusTimer) { clearInterval(autoListStatusTimer); autoListStatusTimer = null }
+  } else {
+    startAutoListStatusPolling()
+    refreshAutoListAgentStatus()
+  }
+})
+
 function addCurrentToAutoList() {
   const url = buildGetUrl()
   if (!url) {
-    alert('請先填入 agent 名稱')
+    alert('請先填入 agent_id 或項目名稱')
     return
   }
-  // 存整個 GET 表單狀態 + 完整 URL，方便 reuse
+  const raw = document.getElementById('get-agent').value.trim()
+  // 分開存 agent name 和 agent_id
+  let agent = '', agentId = ''
+  if (raw.startsWith('ag_')) {
+    agentId = raw
+    // 嘗試從已快取的 agents 列表解析出對應 name
+    agent = agentsById[raw] || ''
+  } else {
+    agent = raw
+  }
   autoList.unshift({
     url: url,
-    agent: document.getElementById('get-agent').value,
+    agent: agent,
+    agentId: agentId,
     arg1: document.getElementById('get-arg1').value,
     arg2: document.getElementById('get-arg2').value,
     arg3: document.getElementById('get-arg3').value,
@@ -523,10 +835,14 @@ function renderHistory() {
   reqHistory.forEach(function(h, i) {
     const div = document.createElement('div')
     div.className = 'history-item'
+    const decoded = decodeUrlSafe(h.url)
+    const urlHtml = '<span class="url-raw">' + escapeHtml(h.url) + '</span>' +
+      (decoded !== h.url ? '<span class="url-decoded">' + escapeHtml(decoded) + '</span>' : '')
+    const titleAttr = escapeHtml(h.url + (decoded !== h.url ? '\n\n解碼：' + decoded : ''))
     div.innerHTML =
-      '<span class="h-time">' + h.time + '</span>' +
-      '<span class="h-method">' + h.method + '</span>' +
-      '<span class="h-url" title="' + h.url + '">' + h.url + '</span>'
+      '<span class="h-time">' + escapeHtml(h.time) + '</span>' +
+      '<span class="h-method">' + escapeHtml(h.method) + '</span>' +
+      '<span class="h-url" title="' + titleAttr + '">' + urlHtml + '</span>'
     div.addEventListener('click', function() { reuseHistory(i) })
     el.appendChild(div)
   })
@@ -577,9 +893,140 @@ async function doHealth() {
   }
 }
 
+/** 從 App 拉 agents 清單，塞進 datalist 並更新 agentsById 快取 */
+async function fetchAgentsList() {
+  try {
+    const res = await fetch(BASE + '/input?action=list_agents')
+    if (!res.ok) return
+    const data = await res.json()
+    const list = Array.isArray(data.agents) ? data.agents : []
+    // 更新 id → name 快取
+    Object.keys(agentsById).forEach(function(k) { delete agentsById[k] })
+    list.forEach(function(a) {
+      if (a.agentId) agentsById[a.agentId] = a.name || ''
+    })
+    // 回填 auto list 舊資料：若 item 只有 agentId 沒 agent name，這次補上
+    let migrated = false
+    autoList.forEach(function(it) {
+      if (it.agentId && !it.agent && agentsById[it.agentId]) {
+        it.agent = agentsById[it.agentId]
+        migrated = true
+      }
+    })
+    if (migrated) saveAutoList()
+    // 不管有沒有 migrated，都重繪 auto list，讓 agent name 顯示反映最新快取
+    renderAutoList()
+    // 填 datalist
+    const datalist = document.getElementById('agents-datalist')
+    if (!datalist) return
+    datalist.innerHTML = ''
+    list.forEach(function(a) {
+      const opt = document.createElement('option')
+      opt.value = a.agentId || ''
+      opt.label = (a.name || '(unnamed)') + (a.allowHttp ? '' : ' [HTTP disabled]')
+      datalist.appendChild(opt)
+    })
+  } catch (_) { /* 忽略 */ }
+}
+
+// 追蹤剛送出但還沒完成的 request：exec_id → { agent name/id, poll timer id }
+const pendingExecs = {}
+
+/** 對指定 exec_id 開始 poll 直到 backend 回報 lastExecId 匹配，然後把 session link 附加到 response */
+function startPollForCompletion(execId, agent, agentId) {
+  if (!execId) return
+  if (pendingExecs[execId]) return  // 已在 poll
+  pendingExecs[execId] = { agent: agent, agentId: agentId, retries: 0 }
+  const tick = async function() {
+    if (!pendingExecs[execId]) return
+    pendingExecs[execId].retries++
+    if (pendingExecs[execId].retries > 300) { delete pendingExecs[execId]; return }  // 給 10 分鐘（2s * 300）
+    try {
+      let url = BASE + '/input?action=get_status'
+      if (agent) url += '&agent=' + encodeURIComponent(agent)
+      else if (agentId) url += '&agent_id=' + encodeURIComponent(agentId)
+      const res = await fetch(url)
+      if (res.ok) {
+        const data = await res.json()
+        const detail = data.detail || {}
+        if (detail.lastExecId === execId) {
+          // 完成了 — 附加 session link 到 response
+          appendSessionLinkToResponse(detail, execId)
+          delete pendingExecs[execId]
+          return
+        }
+      }
+    } catch (_) {}
+    setTimeout(tick, 2000)
+  }
+  setTimeout(tick, 2000)
+}
+
+/** 把 session link 資訊附加到 response box（多筆同時完成會累加） */
+function appendSessionLinkToResponse(detail, execId) {
+  const bodyEl = document.getElementById('input-res')
+  if (!bodyEl) return
+  const sessionUrl = detail.lastSessionUrl || ''
+  const sessionPath = detail.lastSessionPath || ''
+  const tokens = detail.lastTokens || 0
+  const rounds = detail.lastRounds || 0
+  const success = detail.lastSuccess ? '✓ 成功' : '✗ 失敗'
+  const preview = detail.lastContentPreview || ''
+  let extra = document.getElementById('input-res-extra')
+  if (!extra) {
+    extra = document.createElement('div')
+    extra.id = 'input-res-extra'
+    extra.style.marginTop = '10px'
+    extra.style.paddingTop = '10px'
+    extra.style.borderTop = '1px dashed var(--border)'
+    bodyEl.parentNode.insertBefore(extra, bodyEl.nextSibling)
+  }
+  const link = sessionUrl
+    ? '<a href="' + sessionUrl + '" target="_blank" style="color:var(--accent);text-decoration:underline">📄 開啟 session JSON</a>'
+    : '<span style="color:var(--muted)">（無 session 檔）</span>'
+  const block = document.createElement('div')
+  block.style.marginBottom = '10px'
+  block.style.paddingBottom = '8px'
+  block.style.borderBottom = '1px dotted var(--border)'
+  block.innerHTML =
+    '<div style="font-size:12px;color:var(--muted);margin-bottom:6px">' +
+      '<strong style="color:var(--text)">exec_id ' + execId + ' 已完成：</strong> ' + success +
+      '　Rounds: ' + rounds + '　Tokens: ' + tokens +
+    '</div>' +
+    '<div style="font-size:11px;color:var(--muted);word-break:break-all">' + link + '</div>' +
+    (sessionPath ? '<div style="font-size:10px;color:var(--muted);margin-top:4px;font-family:var(--mono);word-break:break-all">' + sessionPath + '</div>' : '') +
+    (preview ? '<div style="margin-top:8px;padding:6px 10px;background:var(--bg);border-radius:5px;font-size:12px;color:var(--text);white-space:pre-wrap">' + preview.replace(/[<>&]/g, function(c){return {'<':'&lt;','>':'&gt;','&':'&amp;'}[c]}) + '</div>' : '')
+  extra.appendChild(block)
+}
+
+async function doStatus() {
+  const val = document.getElementById('get-agent').value.trim()
+  // agent 有填就查該 agent（自動辨識 agent_id vs 名稱），沒填就查全部
+  let url = BASE + '/input?action=get_status'
+  if (val) {
+    url += val.startsWith('ag_')
+      ? '&agent_id=' + encodeURIComponent(val)
+      : '&agent=' + encodeURIComponent(val)
+  }
+  const bodyEl = document.getElementById('health-res')
+  bodyEl.className = 'response-box'
+  bodyEl.textContent = '查詢中…'
+  try {
+    const res = await fetch(url)
+    const text = await res.text()
+    setResponse('health-header', 'health-res', res.status, text)
+    addHistory('GET', url)
+  } catch (err) {
+    setNetError('health-header', 'health-res', err)
+  }
+}
+
 async function doGet() {
   const url = buildGetUrl()
   if (!url) { alert('請填入 agent 名稱'); return }
+  // 清空舊的 session link 附加區塊
+  const oldExtra = document.getElementById('input-res-extra')
+  if (oldExtra) oldExtra.remove()
   const bodyEl = document.getElementById('input-res')
   bodyEl.className = 'response-box'
   bodyEl.textContent = '送出中…'
@@ -588,6 +1035,16 @@ async function doGet() {
     const text = await res.text()
     setResponse('input-header', 'input-res', res.status, text)
     addHistory('GET', url)
+    // 從 URL 抓出 exec_id + agent/agent_id 啟動 poll
+    if (res.ok) {
+      const uu = new URL(url)
+      const execId = uu.searchParams.get('exec_id') || ''
+      const agentName = uu.searchParams.get('agent') || ''
+      const agentId = uu.searchParams.get('agent_id') || ''
+      // 用快取解析 name（若給了 agentId）
+      const resolvedName = agentName || (agentId ? agentsById[agentId] || '' : '')
+      startPollForCompletion(execId, resolvedName, agentId)
+    }
   } catch (err) {
     setNetError('input-header', 'input-res', err)
   }
@@ -607,7 +1064,11 @@ async function doPost() {
   const bodyEl = document.getElementById('input-res')
   bodyEl.className = 'response-box'
   bodyEl.textContent = '送出中…'
-  const payload = JSON.stringify({ agent: agent, parameters: parameters })
+  const execId = generateExecId()
+  const payloadObj = { action: 'run', exec_id: execId, parameters: parameters }
+  if (agent.startsWith('ag_')) payloadObj.agent_id = agent
+  else payloadObj.agent = agent
+  const payload = JSON.stringify(payloadObj)
   try {
     const res  = await fetch(BASE + '/input', {
       method: 'POST',
@@ -625,6 +1086,8 @@ async function doPost() {
 // ── 事件繫結 ──────────────────────────────────────────────────
 
 document.getElementById('btn-health').addEventListener('click', doHealth)
+document.getElementById('btn-status').addEventListener('click', doStatus)
+document.getElementById('btn-fetch-agents').addEventListener('click', fetchAgentsList)
 document.getElementById('btn-get-send').addEventListener('click', doGet)
 document.getElementById('btn-post-send').addEventListener('click', doPost)
 
@@ -645,6 +1108,7 @@ document.getElementById('btn-get-open').addEventListener('click', function() {
 
 document.getElementById('btn-get-add').addEventListener('click', addCurrentToAutoList)
 document.getElementById('btn-autolist-run-all').addEventListener('click', runAllAutoList)
+document.getElementById('btn-autolist-refresh-status').addEventListener('click', refreshAutoListAgentStatus)
 
 document.getElementById('btn-post-example').addEventListener('click', function() {
   document.getElementById('post-agent').value = '項目 1'
@@ -661,9 +1125,14 @@ document.getElementById('btn-clear-history').addEventListener('click', function(
   document.getElementById(id).addEventListener('input', updateUrlPreview)
 })
 
-// 頁面載入時從 App 目錄拉歷史 + auto list
+// 頁面載入時從 App 目錄拉歷史 + auto list，list 就緒後抓一次 agent 狀態並啟動 3 秒輪詢
+// 也拉一次 agents 清單填 datalist
 loadHistory()
-loadAutoList()
+fetchAgentsList()
+loadAutoList().then(function() {
+  refreshAutoListAgentStatus()
+  startAutoListStatusPolling()
+})
 </script>
 </body>
 </html>
