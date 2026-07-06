@@ -339,11 +339,11 @@ const BASE = 'http://127.0.0.1:37123'
 const HISTORY_URL = BASE + '/agent_test_history'
 const AUTOLIST_URL = BASE + '/agent_test_autolist'
 
-// 歷史存到 App 目錄的 agent_test.json；頁面載入時從 server GET，變更後 POST 回去。
+// 歷史存到使用者目錄的 ~/.agent_test/agent_test.json；頁面載入時從 server GET，變更後 POST 回去。
 const reqHistory = []
 let historyLoaded = false
 
-// Auto list：存到 agent_test_autolist.json
+// Auto list：存到 ~/.agent_test/agent_test_autolist.json
 const autoList = []
 let autoListLoaded = false
 
@@ -721,6 +721,10 @@ function buildStatusDetailHtml(agent, running, queued, detail, myExecId) {
     }
     if (detail.lastRounds) rows.push('  <div class="d-row"><span class="d-label">Rounds</span><span class="d-value">' + detail.lastRounds + '</span></div>')
     if (detail.lastTokens) rows.push('  <div class="d-row"><span class="d-label">Tokens</span><span class="d-value">' + detail.lastTokens + '</span></div>')
+    if (detail.lastCachedTokens !== undefined && detail.lastPromptTokens) {
+      const pct = (detail.lastCachedTokens / detail.lastPromptTokens * 100).toFixed(1)
+      rows.push('  <div class="d-row"><span class="d-label">Cache 命中率</span><span class="d-value">' + detail.lastCachedTokens + ' / ' + detail.lastPromptTokens + ' = ' + pct + '%</span></div>')
+    }
     if (detail.lastSessionUrl) {
       rows.push('  <div class="d-row"><span class="d-label">Session</span><span class="d-value"><a class="d-link" href="' + detail.lastSessionUrl + '" target="_blank">📄 開啟 session JSON</a></span></div>')
     }
@@ -762,7 +766,7 @@ document.addEventListener('visibilitychange', function() {
 function addCurrentToAutoList() {
   const url = buildGetUrl()
   if (!url) {
-    alert('請先填入 agent_id 或項目名稱')
+    alert('請先填入 agent_id 或 AGENT NAME')
     return
   }
   const raw = document.getElementById('get-agent').value.trim()
@@ -972,6 +976,11 @@ function appendSessionLinkToResponse(detail, execId) {
   const rounds = detail.lastRounds || 0
   const success = detail.lastSuccess ? '✓ 成功' : '✗ 失敗'
   const preview = detail.lastContentPreview || ''
+  const cached = detail.lastCachedTokens
+  const promptTk = detail.lastPromptTokens
+  const cachePct = (cached !== undefined && promptTk)
+    ? '　Cache: ' + cached + '/' + promptTk + ' (' + (cached / promptTk * 100).toFixed(1) + '%)'
+    : ''
   let extra = document.getElementById('input-res-extra')
   if (!extra) {
     extra = document.createElement('div')
@@ -991,7 +1000,7 @@ function appendSessionLinkToResponse(detail, execId) {
   block.innerHTML =
     '<div style="font-size:12px;color:var(--muted);margin-bottom:6px">' +
       '<strong style="color:var(--text)">exec_id ' + execId + ' 已完成：</strong> ' + success +
-      '　Rounds: ' + rounds + '　Tokens: ' + tokens +
+      '　Rounds: ' + rounds + '　Tokens: ' + tokens + cachePct +
     '</div>' +
     '<div style="font-size:11px;color:var(--muted);word-break:break-all">' + link + '</div>' +
     (sessionPath ? '<div style="font-size:10px;color:var(--muted);margin-top:4px;font-family:var(--mono);word-break:break-all">' + sessionPath + '</div>' : '') +

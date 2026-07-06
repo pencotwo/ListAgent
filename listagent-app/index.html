@@ -29,7 +29,8 @@
             </select>
           </div>
           <button id="btn-events" title="事件設定" aria-label="事件設定">⏰</button>
-          <button id="btn-add" title="新增項目">＋</button>
+          <button id="btn-add" title="新增 Agent">＋</button>
+          <button id="btn-global-settings" title="Settings" aria-label="Settings">⚙️</button>
         </div>
       </header>
 
@@ -77,14 +78,14 @@
     <div id="settings-overlay" class="overlay hidden">
       <div id="settings-dialog" class="dialog">
         <div class="dialog-header">
-          <h2>⚙️ 項目設定</h2>
+          <h2>⚙️ Agent Settings</h2>
           <button id="btn-close-dialog" class="btn-icon" title="關閉">✕</button>
         </div>
 
         <div class="dialog-body">
-          <!-- 項目名稱 -->
-          <label class="form-label" for="input-name">項目名稱</label>
-          <input type="text" id="input-name" class="form-input" placeholder="輸入項目名稱" />
+          <!-- AGENT NAME -->
+          <label class="form-label" for="input-name">AGENT NAME</label>
+          <input type="text" id="input-name" class="form-input" placeholder="輸入 AGENT NAME" />
 
           <!-- Agent ID（唯讀） -->
           <label class="form-label" for="input-agent-id">Agent ID（穩定不變，供 HTTP 呼叫用）</label>
@@ -148,23 +149,6 @@
               <input type="checkbox" id="input-tools-search" />
               tools search（勾選後，初始不帶工具給 AI，AI 需先呼叫 <code>tools_search</code> 搜出需要的工具，才會在後續 round 加入該工具）
             </label>
-            <div class="embedding-config">
-              <p class="tool-hint">🔍 <b>向量搜尋 tools</b>（tools_search 開啟時生效）：填入 embedding API 三個欄位後，會用向量搜尋從使用者任務挑最相關的 top-5 工具，預先解鎖進 tools[] payload，AI 少一輪 tools_search。三欄任一為空則跳過。</p>
-              <div class="row">
-                <div class="field">
-                  <label>Embedding API Base URL</label>
-                  <input id="input-embedding-base-url" type="text" placeholder="例如：https://api.openai.com/v1" />
-                </div>
-                <div class="field">
-                  <label>Embedding API Key</label>
-                  <input id="input-embedding-api-key" type="password" placeholder="（選填）" />
-                </div>
-                <div class="field">
-                  <label>Embedding Model</label>
-                  <input id="input-embedding-model" type="text" placeholder="例如：text-embedding-3-small" />
-                </div>
-              </div>
-            </div>
           </fieldset>
 
           <fieldset class="memory-group">
@@ -200,6 +184,46 @@
       </div>
     </div>
 
+    <!-- 全域設定對話框 (預設隱藏) -->
+    <div id="global-settings-overlay" class="overlay hidden">
+      <div id="global-settings-dialog" class="dialog">
+        <div class="dialog-header">
+          <h2>⚙️ Global Settings</h2>
+          <button id="btn-close-global-settings" class="btn-icon" title="關閉">✕</button>
+        </div>
+
+        <div class="dialog-body">
+          <fieldset class="embedding-group">
+            <legend>Embedding 設定 (用於向量搜尋 tools)</legend>
+            <p class="tool-hint">🔍 <b>向量搜尋 tools</b>（tools_search 開啟時生效）：填入 embedding API 三個欄位後，會用向量搜尋從使用者任務挑最相關的 top-5 工具，預先解鎖進 tools[] payload，AI 少一輪 tools_search。三欄任一為空則跳過。</p>
+            <div class="row" style="display:flex; gap:12px; margin-bottom:12px;">
+              <div class="field" style="flex:1;">
+                <label class="form-label" for="input-global-embedding-base-url">Embedding API Base URL</label>
+                <input id="input-global-embedding-base-url" class="form-input" type="text" placeholder="例如：http://localhost:11434/v1" />
+              </div>
+            </div>
+            <div class="row" style="display:flex; gap:12px; margin-bottom:12px;">
+              <div class="field" style="flex:1;">
+                <label class="form-label" for="input-global-embedding-api-key">Embedding API Key</label>
+                <input id="input-global-embedding-api-key" class="form-input" type="password" placeholder="（選填）" />
+              </div>
+            </div>
+            <div class="row" style="display:flex; gap:12px;">
+              <div class="field" style="flex:1;">
+                <label class="form-label" for="input-global-embedding-model">Embedding Model</label>
+                <input id="input-global-embedding-model" class="form-input" type="text" placeholder="例如：text-embedding-3-small" />
+              </div>
+            </div>
+          </fieldset>
+        </div>
+
+        <div class="dialog-footer">
+          <button id="btn-global-settings-save" class="btn btn-primary">💾 儲存</button>
+          <button id="btn-global-settings-cancel" class="btn btn-secondary">取消</button>
+        </div>
+      </div>
+    </div>
+
     <!-- 排程事件設定視窗 -->
     <div id="events-overlay" class="overlay hidden">
       <div id="events-dialog" class="dialog events-dialog">
@@ -212,7 +236,7 @@
           <fieldset class="event-group">
             <legend>🌐 允許透過 HTTP 請求執行 Agent 任務（監聽埠：37123）</legend>
             <div id="http-agents-list" class="http-agents-list"></div>
-            <p class="http-hint">勾選代表該 Agent 可以接收 HTTP 請求；啟用後，可透過 GET 或 POST 請求 <code>http://127.0.0.1:37123/input?agent=項目名稱</code> 來觸發任務。</p>
+            <p class="http-hint">勾選代表該 Agent 可以接收 HTTP 請求；啟用後，可透過 GET 或 POST 請求 <code>http://127.0.0.1:37123/input?agent=AGENT_NAME</code> 來觸發任務。</p>
           </fieldset>
 
           <fieldset class="event-group">

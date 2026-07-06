@@ -114,6 +114,7 @@ body {
 }
 
 #btn-events,
+#btn-global-settings,
 #btn-add {
   width: 36px;
   height: 36px;
@@ -127,12 +128,14 @@ body {
   transition: all 0.2s ease;
 }
 
-#btn-events {
+#btn-events,
+#btn-global-settings {
   border: 1px solid var(--border);
   font-size: 16px;
 }
 
-#btn-events:hover {
+#btn-events:hover,
+#btn-global-settings:hover {
   border-color: var(--accent);
   background: var(--accent-light);
   transform: scale(1.08);
@@ -927,7 +930,8 @@ body {
 }
 
 /* Skills fieldset */
-.skill-group {
+.skill-group,
+.embedding-group {
   min-width: 0;
   margin: 0;
   padding: 12px;
@@ -936,7 +940,8 @@ body {
   background: var(--bg-surface);
 }
 
-.skill-group legend {
+.skill-group legend,
+.embedding-group legend {
   padding: 0 8px;
   color: var(--text-secondary);
   font-size: 13px;
@@ -1056,6 +1061,16 @@ body {
 .mcp-server-row .mcp-command,
 .mcp-server-row .mcp-url {
   font-size: 12px;
+}
+
+/* env textarea 佔第 2 列，橫跨 name~command 的位置 */
+.mcp-server-row .mcp-env {
+  grid-column: 2 / 5;
+  grid-row: 2;
+  font-size: 11px;
+  font-family: var(--mono, monospace);
+  resize: vertical;
+  min-height: 28px;
 }
 
 .mcp-delete {

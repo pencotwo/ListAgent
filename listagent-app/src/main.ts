@@ -19,6 +19,9 @@ interface SettingsFile {
   events: ScheduledEvent[]
   enableHttpInput?: boolean
   eventMappings?: EventMapping[]
+  embeddingApiBaseUrl?: string
+  embeddingApiKey?: string
+  embeddingModel?: string
 }
 
 interface SkillMeta {
@@ -294,6 +297,8 @@ interface AgentTaskDetail {
   lastExecId?: string
   lastSessionPath?: string
   lastSessionUrl?: string
+  lastPromptTokens?: number
+  lastCachedTokens?: number
 }
 
 /** 每個 agent name 的上一次任務結果（跨 runItem 執行保留） */
@@ -490,14 +495,25 @@ const btnSelectWorkingDirectory = document.getElementById('btn-select-working-di
 const toolCheckboxes = Array.from(document.querySelectorAll<HTMLInputElement>('input[name="agent-tool"]'))
 const inputMemory = document.getElementById('input-memory') as HTMLInputElement
 const inputToolsSearch = document.getElementById('input-tools-search') as HTMLInputElement
-const inputEmbeddingBaseUrl = document.getElementById('input-embedding-base-url') as HTMLInputElement
-const inputEmbeddingApiKey = document.getElementById('input-embedding-api-key') as HTMLInputElement
-const inputEmbeddingModel = document.getElementById('input-embedding-model') as HTMLInputElement
+const inputEmbeddingBaseUrl = document.getElementById('input-global-embedding-base-url') as HTMLInputElement
+const inputEmbeddingApiKey = document.getElementById('input-global-embedding-api-key') as HTMLInputElement
+const inputEmbeddingModel = document.getElementById('input-global-embedding-model') as HTMLInputElement
 const skillListEl = document.getElementById('skill-list') as HTMLElement
 const selectPreset = document.getElementById('select-preset') as HTMLSelectElement
 const btnSavePreset = document.getElementById('btn-save-preset') as HTMLButtonElement
 const btnSave = document.getElementById('btn-save') as HTMLButtonElement
 const btnCancel = document.getElementById('btn-cancel') as HTMLButtonElement
+
+// 全域設定視窗元素
+const globalSettingsOverlay = document.getElementById('global-settings-overlay') as HTMLElement
+const btnGlobalSettings = document.getElementById('btn-global-settings') as HTMLButtonElement
+const btnCloseGlobalSettings = document.getElementById('btn-close-global-settings') as HTMLButtonElement
+const btnGlobalSettingsSave = document.getElementById('btn-global-settings-save') as HTMLButtonElement
+const btnGlobalSettingsCancel = document.getElementById('btn-global-settings-cancel') as HTMLButtonElement
+
+let globalEmbeddingApiBaseUrl = ''
+let globalEmbeddingApiKey = ''
+let globalEmbeddingModel = ''
 
 // 排程事件視窗元素
 const eventsOverlay = document.getElementById('events-overlay') as HTMLElement
@@ -953,9 +969,9 @@ async function runItem(id: number, parameters?: unknown, execId?: string): Promi
         memory: item.memory,
         itemCode: item.code,
         toolsSearch: item.toolsSearch,
-        embeddingApiBaseUrl: item.embeddingApiBaseUrl,
-        embeddingApiKey: item.embeddingApiKey,
-        embeddingModel: item.embeddingModel,
+        embeddingApiBaseUrl: globalEmbeddingApiBaseUrl,
+        embeddingApiKey: globalEmbeddingApiKey,
+        embeddingModel: globalEmbeddingModel,
       },
     })
     logs.push({ level: 'success', message: `模型端點：${result.endpoint}`, timestamp: Date.now() })
@@ -976,6 +992,13 @@ async function runItem(id: number, parameters?: unknown, execId?: string): Promi
       })
       lines.push(`  ───────────────`)
       lines.push(`  合計：${formatUsage(summary.total)}`)
+      // 顯示 cached_tokens 占 prompt 的比例
+      const cached = summary.total.cachedTokens
+      const prompt = summary.total.prompt
+      if (cached !== undefined && prompt > 0) {
+        const pct = (cached / prompt * 100).toFixed(1)
+        lines.push(`  Cache 命中率：${cached} / ${prompt} = ${pct}%`)
+      }
       logs.push({ level: 'info', message: lines.join('\n'), timestamp: Date.now() })
     }
     logs.push({ level: 'system', message: `══════ Agent「${item.name}」執行結束 ══════`, timestamp: Date.now() + 1 })
@@ -990,6 +1013,8 @@ async function runItem(id: number, parameters?: unknown, execId?: string): Promi
       lastTokens: summary.total.total,
       lastRounds: summary.rounds.length,
       lastExecId: finishedExecId,
+      lastPromptTokens: summary.total.prompt,
+      lastCachedTokens: summary.total.cachedTokens,
     })
     const queue = itemTaskQueues.get(id)
     const nextTask = queue?.shift()
@@ -1516,12 +1541,14 @@ function renderSessionViewInPanel(session: SessionData): void {
     response: '← AI Model 回應',
     tool: '⚙ Tool 執行',
     error: '✖ AI Model 錯誤',
+    vector_search: '🔍 向量搜尋 tools',
   }
   const levelMap: Record<string, string> = {
     request: 'info',
     response: 'success',
     tool: 'system',
     error: 'error',
+    vector_search: 'system',
   }
 
   const logs: LogEntry[] = session.exchanges.flatMap((ex) => {
@@ -2094,9 +2121,19 @@ function makeMcpRow(cfg: McpServerConfig, idx: number): HTMLElement {
   urlInput.placeholder = 'http://localhost:3000'
   urlInput.value = cfg.url
 
+  // env vars 一行一個「KEY=VALUE」；只在 stdio 模式下有用
+  const envInput = document.createElement('textarea')
+  envInput.className = 'mcp-env form-input'
+  envInput.rows = 2
+  envInput.placeholder = 'ENV_VAR=value（每行一個，選填）'
+  envInput.value = Object.entries(cfg.env ?? {})
+    .map(([k, v]) => `${k}=${v}`)
+    .join('\n')
+
   const updateVisibility = () => {
     const isStdio = transportSel.value === 'stdio'
     commandInput.style.display = isStdio ? '' : 'none'
+    envInput.style.display = isStdio ? '' : 'none'
     urlInput.style.display = isStdio ? 'none' : ''
   }
   updateVisibility()
@@ -2109,7 +2146,7 @@ function makeMcpRow(cfg: McpServerConfig, idx: number): HTMLElement {
   delBtn.textContent = '✕'
   delBtn.addEventListener('click', () => row.remove())
 
-  row.append(enabledCb, nameInput, transportSel, commandInput, urlInput, delBtn)
+  row.append(enabledCb, nameInput, transportSel, commandInput, urlInput, envInput, delBtn)
   return row
 }
 
@@ -2123,13 +2160,24 @@ function getMcpServersFromUI(): McpServerConfig[] {
     const transport = (row.querySelector<HTMLSelectElement>('.mcp-transport')!.value) as 'stdio' | 'http'
     const commandLine = row.querySelector<HTMLInputElement>('.mcp-command')!.value.trim()
     const [command, ...args] = commandLine.split(/\s+/).filter(Boolean)
+    const envRaw = row.querySelector<HTMLTextAreaElement>('.mcp-env')?.value ?? ''
+    const env: Record<string, string> = {}
+    envRaw.split('\n').forEach((line) => {
+      const trimmed = line.trim()
+      if (!trimmed || trimmed.startsWith('#')) return
+      const eq = trimmed.indexOf('=')
+      if (eq <= 0) return  // 沒有 = 或 = 在最前面 → 跳過
+      const k = trimmed.slice(0, eq).trim()
+      const v = trimmed.slice(eq + 1)  // value 保留原樣（含前後空白）
+      if (k) env[k] = v
+    })
     return {
       name: row.querySelector<HTMLInputElement>('.mcp-name')!.value.trim(),
       enabled: row.querySelector<HTMLInputElement>('.mcp-enabled')!.checked,
       transport,
       command: command ?? '',
       args,
-      env: {},
+      env,
       url: row.querySelector<HTMLInputElement>('.mcp-url')!.value.trim(),
     }
   })
@@ -2163,13 +2211,13 @@ async function fetchAndRenderMcpTools(servers: McpServerConfig[], selectedMcpToo
     return
   }
 
-  const useAll = selectedMcpTools.length === 0
   mcpToolSectionEl.innerHTML =
     '<div class="mcp-tool-divider">— MCP 工具 —</div>' +
     allTools
       .map(({ serverName, toolName, description }) => {
         const key = `${serverName}::${toolName}`
-        const checked = useAll || selectedMcpTools.includes(key)
+        const serverHasSavedTools = selectedMcpTools.includes(`${serverName}::__configured__`)
+        const checked = serverHasSavedTools ? selectedMcpTools.includes(key) : true
         return (
           `<label class="tool-option" title="${escapeHtml(description)}">` +
           `<input type="checkbox" name="mcp-tool" value="${escapeHtml(key)}"${checked ? ' checked' : ''} />` +
@@ -2206,9 +2254,6 @@ async function openSettingsDialog(itemId: number): Promise<void> {
   })
   inputMemory.checked = item.memory
   inputToolsSearch.checked = item.toolsSearch
-  inputEmbeddingBaseUrl.value = item.embeddingApiBaseUrl
-  inputEmbeddingApiKey.value = item.embeddingApiKey
-  inputEmbeddingModel.value = item.embeddingModel
 
   settingsOverlay.classList.remove('hidden')
 
@@ -2235,6 +2280,68 @@ function closeSettingsDialog(): void {
   editingItemId = null
 }
 
+/** 載入全域設定 */
+async function loadGlobalSettings(): Promise<void> {
+  if (isTauri()) {
+    try {
+      const settings: SettingsFile = await invoke('read_settings')
+      globalEmbeddingApiBaseUrl = settings.embeddingApiBaseUrl || ''
+      globalEmbeddingApiKey = settings.embeddingApiKey || ''
+      globalEmbeddingModel = settings.embeddingModel || ''
+    } catch { /* fallback */ }
+  }
+  if (!globalEmbeddingApiBaseUrl) {
+    globalEmbeddingApiBaseUrl = localStorage.getItem('global_embedding_base_url') || ''
+  }
+  if (!globalEmbeddingApiKey) {
+    globalEmbeddingApiKey = localStorage.getItem('global_embedding_api_key') || ''
+  }
+  if (!globalEmbeddingModel) {
+    globalEmbeddingModel = localStorage.getItem('global_embedding_model') || ''
+  }
+
+  inputEmbeddingBaseUrl.value = globalEmbeddingApiBaseUrl
+  inputEmbeddingApiKey.value = globalEmbeddingApiKey
+  inputEmbeddingModel.value = globalEmbeddingModel
+}
+
+/** 儲存全域設定 */
+async function saveGlobalSettings(): Promise<void> {
+  globalEmbeddingApiBaseUrl = inputEmbeddingBaseUrl.value.trim()
+  globalEmbeddingApiKey = inputEmbeddingApiKey.value
+  globalEmbeddingModel = inputEmbeddingModel.value.trim()
+
+  localStorage.setItem('global_embedding_base_url', globalEmbeddingApiBaseUrl)
+  localStorage.setItem('global_embedding_api_key', globalEmbeddingApiKey)
+  localStorage.setItem('global_embedding_model', globalEmbeddingModel)
+
+  if (isTauri()) {
+    try {
+      const settings: SettingsFile = await invoke('read_settings')
+      settings.embeddingApiBaseUrl = globalEmbeddingApiBaseUrl
+      settings.embeddingApiKey = globalEmbeddingApiKey
+      settings.embeddingModel = globalEmbeddingModel
+      settings.enableHttpInput = true
+      await invoke('write_settings', { settings })
+    } catch (e) {
+      console.error('Failed to save global settings via Tauri:', e)
+    }
+  }
+}
+
+/** 開啟全域設定對話框 */
+function openGlobalSettings(): void {
+  inputEmbeddingBaseUrl.value = globalEmbeddingApiBaseUrl
+  inputEmbeddingApiKey.value = globalEmbeddingApiKey
+  inputEmbeddingModel.value = globalEmbeddingModel
+  globalSettingsOverlay.classList.remove('hidden')
+}
+
+/** 關閉全域設定對話框 */
+function closeGlobalSettings(): void {
+  globalSettingsOverlay.classList.add('hidden')
+}
+
 /** 儲存設定 */
 async function saveSettings(): Promise<void> {
   if (editingItemId === null) return
@@ -2251,7 +2358,7 @@ async function saveSettings(): Promise<void> {
   const skills = getCheckedSkills()
 
   if (items.some((candidate) => candidate.id !== editingItemId && itemNameKey(candidate.name) === itemNameKey(name))) {
-    window.alert(`項目名稱「${name}」已存在，請使用不同名稱。`)
+    window.alert(`AGENT NAME「${name}」已存在，請使用不同名稱。`)
     inputName.focus()
     inputName.select()
     return
@@ -2270,12 +2377,26 @@ async function saveSettings(): Promise<void> {
     item.mcpServers = getMcpServersFromUI()
     // Only update mcpTools when the section has been fetched (has checkboxes)
     const mcpToolInputs = mcpToolSectionEl.querySelectorAll<HTMLInputElement>('input[name="mcp-tool"]')
-    if (mcpToolInputs.length > 0) item.mcpTools = getCheckedMcpTools()
+    if (mcpToolInputs.length > 0) {
+      const renderedKeys = Array.from(mcpToolInputs).map((cb) => cb.value)
+      const checkedKeys = getCheckedMcpTools()
+      
+      const renderedServers = Array.from(new Set(renderedKeys.map((key) => key.split('::')[0])))
+      const markers = renderedServers.map((name) => `${name}::__configured__`)
+      
+      const keysToClear = [...renderedKeys, ...markers]
+      const keptKeys = (item.mcpTools || []).filter((key) => !keysToClear.includes(key))
+      
+      item.mcpTools = [...keptKeys, ...checkedKeys, ...markers]
+    }
+    // Clean up tools of servers that no longer exist in the server list
+    const existingServerNames = item.mcpServers.map((s) => s.name)
+    item.mcpTools = (item.mcpTools || []).filter((key) => {
+      const parts = key.split('::')
+      return parts.length >= 2 && existingServerNames.includes(parts[0])
+    })
     item.memory = inputMemory.checked
     item.toolsSearch = inputToolsSearch.checked
-    item.embeddingApiBaseUrl = inputEmbeddingBaseUrl.value.trim()
-    item.embeddingApiKey = inputEmbeddingApiKey.value
-    item.embeddingModel = inputEmbeddingModel.value.trim()
   }
 
   await saveItems()
@@ -2287,7 +2408,7 @@ async function saveSettings(): Promise<void> {
 // 事件繫結
 // ============================================================
 
-/** 新增項目 */
+/** 新增 Agent */
 btnAdd.addEventListener('click', async () => {
   const newId = nextId++
   const newItem: ListItem = {
@@ -2427,10 +2548,31 @@ settingsOverlay.addEventListener('click', (e) => {
   if (e.target === settingsOverlay && settingsOverlayMousedownOnBg) closeSettingsDialog()
 })
 
+/** 全域設定事件繫結 */
+btnGlobalSettings.addEventListener('click', openGlobalSettings)
+btnCloseGlobalSettings.addEventListener('click', closeGlobalSettings)
+btnGlobalSettingsCancel.addEventListener('click', closeGlobalSettings)
+btnGlobalSettingsSave.addEventListener('click', async () => {
+  await saveGlobalSettings()
+  closeGlobalSettings()
+})
+
+let globalSettingsOverlayMousedownOnBg = false
+globalSettingsOverlay.addEventListener('mousedown', (e) => { globalSettingsOverlayMousedownOnBg = e.target === globalSettingsOverlay })
+globalSettingsOverlay.addEventListener('click', (e) => {
+  if (e.target === globalSettingsOverlay && globalSettingsOverlayMousedownOnBg) closeGlobalSettings()
+})
+
 /** 手動重新取得 MCP 工具 */
 document.getElementById('btn-fetch-mcp-tools')!.addEventListener('click', () => {
   const servers = getMcpServersFromUI()
-  const current = getCheckedMcpTools()
+  const checked = getCheckedMcpTools()
+  
+  const mcpToolInputs = mcpToolSectionEl.querySelectorAll<HTMLInputElement>('input[name="mcp-tool"]')
+  const renderedServers = Array.from(new Set(Array.from(mcpToolInputs).map((cb) => cb.value.split('::')[0])))
+  const markers = renderedServers.map((name) => `${name}::__configured__`)
+  
+  const current = [...checked, ...markers]
   const workingDirectory = inputWorkingDirectory.value.trim()
   fetchAndRenderMcpTools(servers, current, workingDirectory)
 })
@@ -2627,8 +2769,9 @@ if (selectTheme) {
 // ============================================================
 
 ;(async () => {
-  // 從 localStorage / Tauri 還原先前儲存的項目
+  // 從 localStorage / Tauri 還原先前儲存的項目與全域設定
   items = await loadItems()
+  await loadGlobalSettings()
   // enableHttpInput initialization removed
   eventMappings = await loadEventMappings()
   scheduledEvents = (await loadScheduledEvents())
