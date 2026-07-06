@@ -983,14 +983,10 @@ async function runItem(id: number, parameters?: unknown, execId?: string): Promi
     taskSuccess = false
     taskContent = String(error)
   } finally {
-    // 統整 token 用量（每輪 + 總計），在結束分隔線之前顯示
+    // 統整 token 用量（總計），在結束分隔線之前顯示
     const summary = summarizeSessionTokens(id)
     if (summary.rounds.length > 0) {
       const lines = ['📊 Token 用量統計：']
-      summary.rounds.forEach(({ round, usage }) => {
-        lines.push(`  Round ${round}：${formatUsage(usage)}`)
-      })
-      lines.push(`  ───────────────`)
       lines.push(`  合計：${formatUsage(summary.total)}`)
       // 顯示 cached_tokens 占 prompt 的比例
       const cached = summary.total.cachedTokens
