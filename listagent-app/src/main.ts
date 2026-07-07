@@ -538,6 +538,9 @@ const msgContent = document.getElementById('message-content') as HTMLElement
 const msgItemName = document.getElementById('msg-item-name') as HTMLElement
 const msgPanelTitle = document.getElementById('msg-panel-title') as HTMLElement
 const sessionListEl = document.getElementById('session-list') as HTMLElement
+const agentUserInput = document.getElementById('agent-user-input') as HTMLTextAreaElement
+const btnSendMessage = document.getElementById('btn-send-message') as HTMLButtonElement
+
 
 // 分隔條元素
 const splitter = document.getElementById('splitter') as HTMLElement
@@ -819,6 +822,7 @@ function selectItem(id: number): void {
   })
 
   renderMessageBox(id)
+  updateInputBoxState()
   void loadAndRenderSessions(item)
 }
 
@@ -943,6 +947,7 @@ async function runItem(id: number, parameters?: unknown, execId?: string): Promi
   }
 
   runningItems.add(id)
+  updateInputBoxState()
   if (execId) currentExecIdByItem.set(id, execId)
   else currentExecIdByItem.delete(id)
   syncAgentStatus()
@@ -999,6 +1004,7 @@ async function runItem(id: number, parameters?: unknown, execId?: string): Promi
     }
     logs.push({ level: 'system', message: `══════ Agent「${item.name}」執行結束 ══════`, timestamp: Date.now() + 1 })
     runningItems.delete(id)
+    updateInputBoxState()
     // 記錄此次任務結果（下次 sync 會帶到 lastEndedAt / lastSuccess / lastTokens…）
     const finishedExecId = currentExecIdByItem.get(id)
     currentExecIdByItem.delete(id)
@@ -1113,6 +1119,31 @@ function renderMessageBox(itemId: number): void {
   // 自動捲到最底部
   msgContent.scrollTop = msgContent.scrollHeight
 }
+
+/** 更新底部的使用者訊息輸入框狀態 */
+function updateInputBoxState(): void {
+  if (!agentUserInput || !btnSendMessage) return
+
+  if (selectedItemId === null) {
+    agentUserInput.disabled = true
+    agentUserInput.placeholder = '請先選取項目'
+    btnSendMessage.disabled = true
+  } else {
+    const item = items.find((i) => i.id === selectedItemId)
+    const isRunning = runningItems.has(selectedItemId)
+
+    if (isRunning) {
+      agentUserInput.disabled = true
+      agentUserInput.placeholder = `Agent「${item?.name ?? ''}」執行中...`
+      btnSendMessage.disabled = true
+    } else {
+      agentUserInput.disabled = false
+      agentUserInput.placeholder = `輸入訊息給 Agent「${item?.name ?? ''}」...`
+      btnSendMessage.disabled = false
+    }
+  }
+}
+
 
 /** 更新切換按鈕的視覺狀態 */
 function updateViewToggleUI(): void {
@@ -2404,6 +2435,26 @@ async function saveSettings(): Promise<void> {
 // 事件繫結
 // ============================================================
 
+/** 發送使用者訊息給選中的 Agent */
+function sendMessageToAgent(): void {
+  if (selectedItemId === null) return
+  const val = agentUserInput.value.trim()
+  if (!val) return
+
+  agentUserInput.value = ''
+  void runItem(selectedItemId, val)
+}
+
+if (agentUserInput && btnSendMessage) {
+  btnSendMessage.addEventListener('click', sendMessageToAgent)
+  agentUserInput.addEventListener('keydown', (e) => {
+    if (e.key === 'Enter' && !e.shiftKey) {
+      e.preventDefault()
+      sendMessageToAgent()
+    }
+  })
+}
+
 /** 新增 Agent */
 btnAdd.addEventListener('click', async () => {
   const newId = nextId++
@@ -2842,6 +2893,7 @@ if (selectTheme) {
   updateViewToggleUI()
   renderList()
   renderScheduledEvents()
+  updateInputBoxState()
   await checkScheduledEventTriggers()
   window.setInterval(() => void checkScheduledEventTriggers(), 1000)
 })()
