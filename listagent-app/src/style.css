@@ -2092,14 +2092,16 @@ body.theme-glass-neon #list-container.card-layout .item-card.selected {
 }
 .log-line .md-table th,
 .log-line .md-table td {
-  border: 1px solid rgba(255, 255, 255, 0.15);
-  padding: 4px 10px;
+  border: var(--md-border-width, 1px) var(--md-border-style, solid) var(--md-border-color, rgba(255, 255, 255, 0.15));
+  padding: var(--md-cell-padding, 4px 10px);
   text-align: left;
   vertical-align: top;
   white-space: normal;
   word-break: break-word;
 }
 .log-line .md-table th {
+  border-width: var(--md-header-border-width, var(--md-border-width, 1px));
+  border-color: var(--md-header-border-color, var(--md-border-color, rgba(255, 255, 255, 0.15)));
   background: rgba(255, 255, 255, 0.06);
   font-weight: 600;
 }
@@ -2126,9 +2128,10 @@ body.theme-glass-neon #list-container.card-layout .item-card.selected {
   }
   .log-line .md-table th,
   .log-line .md-table td {
-    border-color: rgba(0, 0, 0, 0.15);
+    border-color: var(--md-border-color-light, var(--md-border-color, rgba(0, 0, 0, 0.15)));
   }
   .log-line .md-table th {
+    border-color: var(--md-header-border-color-light, var(--md-header-border-color, var(--md-border-color-light, var(--md-border-color, rgba(0, 0, 0, 0.15)))));
     background: rgba(0, 0, 0, 0.05);
   }
   .log-line .md-hr {

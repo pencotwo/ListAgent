@@ -18,9 +18,3 @@ logs/
 Thumbs.db
 Desktop.ini
 
-# Rust target
-listagent-app/src-tauri/target/
-
-# Agent runtime workspace (session data, user work products)
-workspace/
-
