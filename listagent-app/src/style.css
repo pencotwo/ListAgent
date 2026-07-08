@@ -2090,6 +2090,22 @@ body.theme-glass-neon #list-container.card-layout .item-card.selected {
   font-size: 0.95em;
   background: rgba(255, 255, 255, 0.03);
 }
+/* 無框線模式 */
+.log-line .md-table[style*="--md-no-border:1"] th,
+.log-line .md-table[style*="--md-no-border:1"] td {
+  border: none;
+}
+/* 僅外框線模式 */
+.log-line .md-table[style*="--md-outer-only:1"] {
+  border: var(--md-border-width, 1px) var(--md-border-style, solid) var(--md-border-color, rgba(255, 255, 255, 0.15));
+}
+.log-line .md-table[style*="--md-outer-only:1"] th,
+.log-line .md-table[style*="--md-outer-only:1"] td {
+  border: none;
+}
+.log-line .md-table[style*="--md-outer-only:1"] thead tr:first-child th {
+  border-bottom: var(--md-header-border-width, var(--md-border-width, 1px)) var(--md-border-style, solid) var(--md-header-border-color, var(--md-border-color, rgba(255, 255, 255, 0.15)));
+}
 .log-line .md-table th,
 .log-line .md-table td {
   border: var(--md-border-width, 1px) var(--md-border-style, solid) var(--md-border-color, rgba(255, 255, 255, 0.15));
@@ -2125,6 +2141,22 @@ body.theme-glass-neon #list-container.card-layout .item-card.selected {
 @media (prefers-color-scheme: light) {
   .log-line .md-table {
     background: rgba(0, 0, 0, 0.02);
+  }
+  /* 無框線模式 (light) */
+  .log-line .md-table[style*="--md-no-border:1"] th,
+  .log-line .md-table[style*="--md-no-border:1"] td {
+    border: none;
+  }
+  /* 僅外框線模式 (light) */
+  .log-line .md-table[style*="--md-outer-only:1"] {
+    border-color: var(--md-border-color-light, var(--md-border-color, rgba(0, 0, 0, 0.15)));
+  }
+  .log-line .md-table[style*="--md-outer-only:1"] th,
+  .log-line .md-table[style*="--md-outer-only:1"] td {
+    border: none;
+  }
+  .log-line .md-table[style*="--md-outer-only:1"] thead tr:first-child th {
+    border-bottom-color: var(--md-header-border-color-light, var(--md-header-border-color, var(--md-border-color-light, var(--md-border-color, rgba(0, 0, 0, 0.15)))));
   }
   .log-line .md-table th,
   .log-line .md-table td {
