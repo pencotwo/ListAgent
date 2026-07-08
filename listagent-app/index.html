@@ -4,13 +4,13 @@
     <meta charset="UTF-8" />
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>ListAgent</title>
+    <title>ListAgent 1.0.0</title>
   </head>
   <body>
     <div id="app">
       <!-- 頂部工具列 -->
       <header id="toolbar">
-        <h1 id="app-title">📋 ListAgent</h1>
+        <h1 id="app-title">📋 ListAgent 1.0.0</h1>
         <div class="toolbar-actions">
           <div class="theme-selector-container">
             <select id="select-theme" class="theme-select" aria-label="切換主題樣式">
@@ -30,6 +30,7 @@
           </div>
           <button id="btn-events" title="事件設定" aria-label="事件設定">⏰</button>
           <button id="btn-add" title="新增 Agent">＋</button>
+          <button id="btn-list-view-toggle" title="切換卡片／列表顯示" aria-label="切換顯示模式">🫧</button>
           <button id="btn-global-settings" title="Settings" aria-label="Settings">⚙️</button>
         </div>
       </header>
@@ -117,8 +118,8 @@
               <label class="form-label" for="input-api-base-url">API Base URL</label>
               <input type="text" id="input-api-base-url" class="form-input" placeholder="https://api.openai.com/v1" />
 
-              <label class="form-label" for="input-api-key">API Key</label>
-              <input type="password" id="input-api-key" class="form-input" placeholder="sk-…" />
+              <label class="form-label" for="input-api-key">API Key 環境變數</label>
+              <input type="text" id="input-api-key" class="form-input" placeholder="例如 OPENAI_API_KEY" autocomplete="off" />
 
               <label class="form-label" for="input-model-name">Model Name</label>
               <input type="text" id="input-model-name" class="form-input" placeholder="gpt-4o" />
@@ -197,6 +198,18 @@
         </div>
 
         <div class="dialog-body">
+          <fieldset class="font-size-group">
+            <legend>字體</legend>
+            <div class="font-size-row">
+              <span class="form-label">執行過程</span>
+              <div class="font-size-ctrl">
+                <button type="button" id="btn-exec-font-dec" class="font-size-btn">−</button>
+                <span id="exec-font-size-val" class="font-size-val">13px</span>
+                <button type="button" id="btn-exec-font-inc" class="font-size-btn">＋</button>
+              </div>
+            </div>
+          </fieldset>
+
           <fieldset class="embedding-group">
             <legend>Embedding 設定 (用於向量搜尋 tools)</legend>
             <p class="tool-hint">🔍 <b>向量搜尋 tools</b>（tools_search 開啟時生效）：填入 embedding API 三個欄位後，會用向量搜尋從使用者任務挑最相關的 top-5 工具，預先解鎖進 tools[] payload，AI 少一輪 tools_search。三欄任一為空則跳過。</p>
@@ -208,8 +221,8 @@
             </div>
             <div class="row" style="display:flex; gap:12px; margin-bottom:12px;">
               <div class="field" style="flex:1;">
-                <label class="form-label" for="input-global-embedding-api-key">Embedding API Key</label>
-                <input id="input-global-embedding-api-key" class="form-input" type="password" placeholder="（選填）" />
+                <label class="form-label" for="input-global-embedding-api-key">Embedding API Key 環境變數</label>
+                <input id="input-global-embedding-api-key" class="form-input" type="text" placeholder="例如 OPENAI_API_KEY（選填）" autocomplete="off" />
               </div>
             </div>
             <div class="row" style="display:flex; gap:12px;">
@@ -247,8 +260,11 @@
             <legend>⏰ 排程事件設定</legend>
             <div class="event-create-grid">
               <div class="event-field">
-                <label class="form-label" for="input-event-time">觸發時間</label>
-                <input id="input-event-time" class="form-input" type="datetime-local" step="1" />
+                <label class="form-label">觸發時間</label>
+                <div class="clock-inputs-row">
+                  <input id="input-event-date" class="form-input clock-date-input" type="date" />
+                  <button type="button" id="clock-time-btn" class="clock-time-btn">12:00 上午</button>
+                </div>
               </div>
               <div class="event-field">
                 <label class="form-label" for="select-event-agent">執行 Agent</label>
@@ -298,6 +314,23 @@
           <button id="btn-close-events-footer" class="btn btn-secondary">關閉</button>
         </div>
       </div>
+    </div>
+
+    <!-- Clock Picker Popup -->
+    <div id="clock-popup" class="clock-popup hidden">
+      <div class="clock-popup-header">
+        <div class="clock-ampm-toggle">
+          <button type="button" id="btn-am" class="ampm-btn">上午</button>
+          <button type="button" id="btn-pm" class="ampm-btn">下午</button>
+        </div>
+        <div class="clock-time-display">
+          <span id="clock-disp-hour" class="clock-disp-part">12</span>
+          <span class="clock-disp-sep">:</span>
+          <span id="clock-disp-minute" class="clock-disp-part">00</span>
+        </div>
+      </div>
+      <svg id="clock-svg" class="clock-svg" viewBox="0 0 220 220" xmlns="http://www.w3.org/2000/svg"></svg>
+      <p class="clock-popup-hint" id="clock-popup-hint">點選選擇小時</p>
     </div>
 
     <script type="module" src="/src/main.ts"></script>

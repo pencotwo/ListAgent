@@ -97,14 +97,14 @@ interface AgentExecutionResult {
 interface ModelExchangeEvent {
   itemId: number
   round: number
-  phase: 'request' | 'response' | 'tool' | 'error' | 'vector_search'
+  phase: 'request' | 'response' | 'tool' | 'error' | 'vector_search' | 'user_input'
   endpoint: string
   payload: unknown
 }
 
 interface SessionExchange {
   round: number
-  phase: 'request' | 'response' | 'tool' | 'error' | 'vector_search'
+  phase: 'request' | 'response' | 'tool' | 'error' | 'vector_search' | 'user_input'
   endpoint: string
   payload: unknown
   timestamp: number
@@ -166,6 +166,9 @@ let editingItemId: number | null = null
 let selectedItemId: number | null = null
 let scheduledEvents: ScheduledEvent[] = []
 let checkingScheduledEvents = false
+let clockPhase: 'hour' | 'minute' = 'hour'
+let clockHour24 = 12
+let clockMinute = 0
 // enableHttpInput global state has been removed
 let eventMappings: EventMapping[] = []
 
@@ -401,6 +404,7 @@ function recordModelExchange(exchange: ModelExchangeEvent): void {
     tool: '⚙ Tool 執行',
     error: '✖ AI Model 錯誤',
     vector_search: '🔍 向量搜尋 tools',
+    user_input: '💬 使用者插話',
   } as const
   const levels: Record<ModelExchangeEvent['phase'], LogLevel> = {
     request: 'info',
@@ -408,6 +412,7 @@ function recordModelExchange(exchange: ModelExchangeEvent): void {
     tool: 'system',
     error: 'error',
     vector_search: 'system',
+    user_input: 'info',
   }
   const now = Date.now()
   logs.push({
@@ -510,16 +515,28 @@ const btnGlobalSettings = document.getElementById('btn-global-settings') as HTML
 const btnCloseGlobalSettings = document.getElementById('btn-close-global-settings') as HTMLButtonElement
 const btnGlobalSettingsSave = document.getElementById('btn-global-settings-save') as HTMLButtonElement
 const btnGlobalSettingsCancel = document.getElementById('btn-global-settings-cancel') as HTMLButtonElement
+const execFontSizeVal = document.getElementById('exec-font-size-val') as HTMLElement
+const btnExecFontInc = document.getElementById('btn-exec-font-inc') as HTMLButtonElement
+const btnExecFontDec = document.getElementById('btn-exec-font-dec') as HTMLButtonElement
 
 let globalEmbeddingApiBaseUrl = ''
 let globalEmbeddingApiKey = ''
 let globalEmbeddingModel = ''
+let execFontSize = 13
 
 // 排程事件視窗元素
 const eventsOverlay = document.getElementById('events-overlay') as HTMLElement
 const btnCloseEvents = document.getElementById('btn-close-events') as HTMLButtonElement
 const btnCloseEventsFooter = document.getElementById('btn-close-events-footer') as HTMLButtonElement
-const inputEventTime = document.getElementById('input-event-time') as HTMLInputElement
+const inputEventDate = document.getElementById('input-event-date') as HTMLInputElement
+const clockTimeBtn = document.getElementById('clock-time-btn') as HTMLButtonElement
+const clockPopup = document.getElementById('clock-popup') as HTMLElement
+const btnAm = document.getElementById('btn-am') as HTMLButtonElement
+const btnPm = document.getElementById('btn-pm') as HTMLButtonElement
+const clockDispHour = document.getElementById('clock-disp-hour') as HTMLElement
+const clockDispMinute = document.getElementById('clock-disp-minute') as HTMLElement
+const clockSvg = document.getElementById('clock-svg') as unknown as SVGSVGElement
+const clockPopupHint = document.getElementById('clock-popup-hint') as HTMLElement
 const selectEventAgent = document.getElementById('select-event-agent') as HTMLSelectElement
 const selectEventRecurrence = document.getElementById('select-event-recurrence') as HTMLSelectElement
 const eventIntervalFields = document.getElementById('event-interval-fields') as HTMLElement
@@ -555,6 +572,12 @@ let availableSkills: SkillMeta[] = []
 const btnViewToggle = document.getElementById('btn-view-toggle') as HTMLButtonElement
 let viewDetailed = false
 
+// 卡片／列表檢視切換
+const btnListViewToggle = document.getElementById('btn-list-view-toggle') as HTMLButtonElement
+type ViewMode = 'card' | 'list'
+const VIEW_MODE_KEY = 'listagent_view_mode'
+let listViewMode: ViewMode = 'card'
+
 // 水平分隔條拖曳狀態
 let splitterDragging = false
 let splitterStartY = 0
@@ -584,10 +607,24 @@ function renderList(): void {
   emptyState.classList.add('hidden')
   listContainer.classList.remove('hidden')
 
-  items.forEach((item) => {
-    const card = createItemCard(item)
-    listContainer.appendChild(card)
-  })
+  // 切換容器佈局模式
+  if (listViewMode === 'card') {
+    listContainer.classList.add('card-layout')
+  } else {
+    listContainer.classList.remove('card-layout')
+  }
+
+  if (listViewMode === 'list') {
+    items.forEach((item) => {
+      const row = createItemListRow(item)
+      listContainer.appendChild(row)
+    })
+  } else {
+    items.forEach((item) => {
+      const card = createItemCard(item)
+      listContainer.appendChild(card)
+    })
+  }
 }
 
 /** 建立單一項目卡片 */
@@ -615,7 +652,9 @@ function createItemCard(item: ListItem): HTMLElement {
     eventIcon.title = `事件：${itemEvents.length}（待執行／循環：${activeEvents.length}）`
   }
 
-  // 最左側編號已移除，保留原排版結構
+  // 圖示列（卡片頂部）
+  const iconsRow = document.createElement('div')
+  iconsRow.className = 'card-icons-row'
 
   // 項目資訊
   const info = document.createElement('div')
@@ -647,6 +686,12 @@ function createItemCard(item: ListItem): HTMLElement {
     void runItem(item.id)
   })
 
+  // 底部列：spinners + run button
+  const bottomRow = document.createElement('div')
+  bottomRow.className = 'card-bottom-row'
+  bottomRow.appendChild(spinners)
+  bottomRow.appendChild(runBtn)
+
   // 右側：齒輪按鈕
   const gearBtn = document.createElement('button')
   gearBtn.className = 'btn-gear'
@@ -670,13 +715,14 @@ function createItemCard(item: ListItem): HTMLElement {
     selectItem(item.id)
   })
 
-  if (itemEvents.length > 0) card.appendChild(eventIcon)
+  // 組裝圖示列
+  if (itemEvents.length > 0) iconsRow.appendChild(eventIcon)
   if (item.allowHttp) {
     const httpIcon = document.createElement('span')
     httpIcon.className = 'item-event-icon active'
     httpIcon.textContent = '🌐'
     httpIcon.title = '允許透過 HTTP 請求執行此 Agent 任務'
-    card.appendChild(httpIcon)
+    iconsRow.appendChild(httpIcon)
   }
   const itemMappings = eventMappings.filter((m) => m.agentId === item.id)
   if (itemMappings.length > 0) {
@@ -684,14 +730,109 @@ function createItemCard(item: ListItem): HTMLElement {
     mappingIcon.className = 'item-event-icon active'
     mappingIcon.textContent = '🔗'
     mappingIcon.title = `事件訂閱：已訂閱 ${itemMappings.length} 個自訂事件（${itemMappings.map(m => m.eventId).join(', ')}）`
-    card.appendChild(mappingIcon)
+    iconsRow.appendChild(mappingIcon)
   }
+
+  // 組裝卡片（順序：圖示列 → 資訊 → 底部 → 齒輪）
+  card.appendChild(iconsRow)
   card.appendChild(info)
-  card.appendChild(spinners)
-  card.appendChild(runBtn)
+  card.appendChild(bottomRow)
   card.appendChild(gearBtn)
 
   return card
+}
+
+/** 建立單一項目列表列（精簡模式） */
+function createItemListRow(item: ListItem): HTMLElement {
+  const row = document.createElement('div')
+  row.className = 'item-list-row'
+  row.dataset.id = String(item.id)
+
+  if (selectedItemId === item.id) {
+    row.classList.add('selected')
+  }
+  if (runningItems.has(item.id)) {
+    row.classList.add('has-running-agent')
+  }
+
+  const itemEvents = scheduledEvents.filter((event) => event.agentId === item.id)
+  const activeEvents = itemEvents.filter((event) => event.recurrence === 'interval' || !event.executedAt)
+  const eventIcon = document.createElement('span')
+  if (itemEvents.length > 0) {
+    eventIcon.className = `item-event-icon${activeEvents.length > 0 ? ' active' : ''}`
+    eventIcon.textContent = '⏰'
+    eventIcon.title = `事件：${itemEvents.length}（待執行／循環：${activeEvents.length}）`
+  }
+
+  const info = document.createElement('div')
+  info.className = 'item-info'
+
+  const nameEl = document.createElement('span')
+  nameEl.className = 'item-name'
+  nameEl.textContent = item.name
+
+  const metaEl = document.createElement('span')
+  metaEl.className = 'item-meta'
+  metaEl.textContent = formatMeta(item)
+
+  info.appendChild(nameEl)
+  info.appendChild(metaEl)
+
+  const spinners = document.createElement('span')
+  spinners.className = 'run-spinners'
+  renderSpinners(spinners, item.id)
+
+  const runBtn = document.createElement('button')
+  runBtn.className = 'btn-run'
+  runBtn.innerHTML = '▶️'
+  runBtn.title = runningItems.has(item.id) ? '再按會加入 Queue' : '執行'
+  runBtn.addEventListener('click', (e) => {
+    e.stopPropagation()
+    void runItem(item.id)
+  })
+
+  const gearBtn = document.createElement('button')
+  gearBtn.className = 'btn-gear'
+  gearBtn.title = '設定'
+  gearBtn.innerHTML = '⚙️'
+  gearBtn.addEventListener('click', (e) => {
+    e.stopPropagation()
+    openSettingsDialog(item.id)
+  })
+
+  row.addEventListener('mouseenter', () => {
+    gearBtn.classList.add('visible')
+  })
+  row.addEventListener('mouseleave', () => {
+    gearBtn.classList.remove('visible')
+  })
+
+  row.addEventListener('click', () => {
+    selectItem(item.id)
+  })
+
+  if (itemEvents.length > 0) row.appendChild(eventIcon)
+  if (item.allowHttp) {
+    const httpIcon = document.createElement('span')
+    httpIcon.className = 'item-event-icon active'
+    httpIcon.textContent = '🌐'
+    httpIcon.title = '允許透過 HTTP 請求執行此 Agent 任務'
+    row.appendChild(httpIcon)
+  }
+  const itemMappings = eventMappings.filter((m) => m.agentId === item.id)
+  if (itemMappings.length > 0) {
+    const mappingIcon = document.createElement('span')
+    mappingIcon.className = 'item-event-icon active'
+    mappingIcon.textContent = '🔗'
+    mappingIcon.title = `事件訂閱：已訂閱 ${itemMappings.length} 個自訂事件（${itemMappings.map(m => m.eventId).join(', ')}）`
+    row.appendChild(mappingIcon)
+  }
+  row.appendChild(info)
+  row.appendChild(spinners)
+  row.appendChild(runBtn)
+  row.appendChild(gearBtn)
+
+  return row
 }
 
 /** 依 running + queue 狀態填入 N 個轉圈圈 icon（running=1 + queued=N） */
@@ -769,7 +910,7 @@ function cancelQueuedTask(itemId: number, idx: number): void {
   itemLogs.set(itemId, logs)
   syncAgentStatus()
   // 重繪這張 card 的 spinner；也刷新 message box 讓 log 立即顯示
-  const card = document.querySelector(`.item-card[data-id="${itemId}"]`) as HTMLElement | null
+  const card = document.querySelector(`.item-card[data-id="${itemId}"], .item-list-row[data-id="${itemId}"]`) as HTMLElement | null
   if (card) {
     const spinners = card.querySelector('.run-spinners') as HTMLElement | null
     if (spinners) renderSpinners(spinners, itemId)
@@ -812,7 +953,7 @@ function selectItem(id: number): void {
   viewingSessionPath = null
 
   // 重新渲染以更新卡片 selected 樣式
-  document.querySelectorAll('.item-card').forEach((card) => {
+  document.querySelectorAll('.item-card, .item-list-row').forEach((card) => {
     const cardId = Number((card as HTMLElement).dataset.id)
     if (cardId === id) {
       card.classList.add('selected')
@@ -1076,7 +1217,7 @@ async function drainHttpInputs(): Promise<void> {
 
 /** 更新卡片上的執行狀態 */
 function updateCardRunButton(id: number, running: boolean): void {
-  const card = document.querySelector(`.item-card[data-id="${id}"]`) as HTMLElement | null
+  const card = document.querySelector(`.item-card[data-id="${id}"], .item-list-row[data-id="${id}"]`) as HTMLElement | null
   if (!card) return
 
   const spinners = card.querySelector('.run-spinners') as HTMLElement | null
@@ -1132,14 +1273,12 @@ function updateInputBoxState(): void {
     const item = items.find((i) => i.id === selectedItemId)
     const isRunning = runningItems.has(selectedItemId)
 
+    agentUserInput.disabled = false
+    btnSendMessage.disabled = false
     if (isRunning) {
-      agentUserInput.disabled = true
-      agentUserInput.placeholder = `Agent「${item?.name ?? ''}」執行中...`
-      btnSendMessage.disabled = true
+      agentUserInput.placeholder = `對執行中的 Agent「${item?.name ?? ''}」插話...`
     } else {
-      agentUserInput.disabled = false
       agentUserInput.placeholder = `輸入訊息給 Agent「${item?.name ?? ''}」...`
-      btnSendMessage.disabled = false
     }
   }
 }
@@ -1148,6 +1287,19 @@ function updateInputBoxState(): void {
 /** 更新切換按鈕的視覺狀態 */
 function updateViewToggleUI(): void {
   btnViewToggle.textContent = viewDetailed ? '詳細' : '簡化'
+}
+
+/** 更新列表檢視切換按鈕的視覺狀態 */
+function updateListViewToggleUI(): void {
+  if (listViewMode === 'list') {
+    btnListViewToggle.textContent = '🫧'
+    btnListViewToggle.classList.add('active')
+    btnListViewToggle.title = '切換為卡片顯示'
+  } else {
+    btnListViewToggle.textContent = '🫧'
+    btnListViewToggle.classList.remove('active')
+    btnListViewToggle.title = '切換為列表顯示'
+  }
 }
 
 const SIMPLE_TRUNCATE_LIMIT = 600
@@ -1340,7 +1492,14 @@ function makeSimpleExchangeEntry(
     case 'tool': {
       const name = (p.name as string) ?? '?'
       const result = (p.result as string) ?? ''
-      return { level: 'system', message: `🔧 工具 ${name} 結果：\n${result}`, timestamp, kind: 'simple' }
+      const args = p.arguments as Record<string, unknown> | undefined
+      const filePath = args?.path as string | undefined
+      const label = filePath ? `🔧 工具 ${name} [${filePath}]` : `🔧 工具 ${name}`
+      return { level: 'system', message: `${label}\n${result}`, timestamp, kind: 'simple' }
+    }
+    case 'user_input': {
+      const content = (p.content as string) ?? ''
+      return { level: 'info', message: `💬 使用者插話：\n${content}`, timestamp, kind: 'simple' }
     }
     case 'error': {
       const message = (p.message as string) ?? String(payload)
@@ -1569,6 +1728,7 @@ function renderSessionViewInPanel(session: SessionData): void {
     tool: '⚙ Tool 執行',
     error: '✖ AI Model 錯誤',
     vector_search: '🔍 向量搜尋 tools',
+    user_input: '💬 使用者插話',
   }
   const levelMap: Record<string, string> = {
     request: 'info',
@@ -1576,6 +1736,7 @@ function renderSessionViewInPanel(session: SessionData): void {
     tool: 'system',
     error: 'error',
     vector_search: 'system',
+    user_input: 'info',
   }
 
   const logs: LogEntry[] = session.exchanges.flatMap((ex) => {
@@ -1798,11 +1959,6 @@ function formatEventTime(timestamp: number): string {
   return `${date.getFullYear()}-${part(date.getMonth() + 1)}-${part(date.getDate())} ${part(date.getHours())}:${part(date.getMinutes())}:${part(date.getSeconds())}`
 }
 
-function toDatetimeLocalValue(timestamp: number): string {
-  const date = new Date(timestamp)
-  const part = (value: number) => String(value).padStart(2, '0')
-  return `${date.getFullYear()}-${part(date.getMonth() + 1)}-${part(date.getDate())}T${part(date.getHours())}:${part(date.getMinutes())}:${part(date.getSeconds())}`
-}
 
 function formatEventInterval(seconds: number): string {
   if (seconds % 86400 === 0) return `${seconds / 86400} 天`
@@ -1879,6 +2035,176 @@ function renderScheduledEvents(): void {
   })
 }
 
+// ============================================================
+// Clock Picker
+// ============================================================
+
+function clockMarkPos(index: number, total: number, r: number): { x: number; y: number } {
+  const angle = (index / total) * 2 * Math.PI - Math.PI / 2
+  return { x: 110 + r * Math.cos(angle), y: 110 + r * Math.sin(angle) }
+}
+
+function clockAppend<K extends keyof SVGElementTagNameMap>(
+  tag: K,
+  attrs: Record<string, string | number>,
+  text?: string
+): SVGElementTagNameMap[K] {
+  const NS = 'http://www.w3.org/2000/svg'
+  const el = document.createElementNS(NS, tag) as SVGElementTagNameMap[K]
+  for (const [k, v] of Object.entries(attrs)) (el as Element).setAttribute(k, String(v))
+  if (text !== undefined) el.textContent = text
+  clockSvg.appendChild(el)
+  return el
+}
+
+function renderClockFace(): void {
+  while (clockSvg.firstChild) clockSvg.removeChild(clockSvg.firstChild)
+  const cx = 110, cy = 110
+
+  clockAppend('circle', { cx, cy, r: 100, class: 'clock-face-bg' })
+
+  if (clockPhase === 'hour') {
+    const selH12 = clockHour24 % 12 || 12
+    const { x: sx, y: sy } = clockMarkPos(selH12, 12, 80)
+    clockAppend('line', { x1: cx, y1: cy, x2: sx, y2: sy, class: 'clock-hand' })
+    clockAppend('circle', { cx: sx, cy: sy, r: 17, class: 'clock-mark-sel' })
+    for (let h = 1; h <= 12; h++) {
+      const { x, y } = clockMarkPos(h, 12, 80)
+      clockAppend('text', {
+        x, y, 'text-anchor': 'middle', 'dominant-baseline': 'central',
+        class: h === selH12 ? 'clock-mark-text sel' : 'clock-mark-text'
+      }, `${h}`)
+    }
+  } else {
+    const isFiveSel = clockMinute % 5 === 0
+    const selR = isFiveSel ? 78 : 84
+    const { x: sx, y: sy } = clockMarkPos(clockMinute, 60, selR)
+    clockAppend('line', { x1: cx, y1: cy, x2: sx, y2: sy, class: 'clock-hand' })
+    clockAppend('circle', { cx: sx, cy: sy, r: isFiveSel ? 17 : 7, class: 'clock-mark-sel' })
+    for (let m = 0; m < 60; m++) {
+      if (m % 5 !== 0 && m !== clockMinute) {
+        const { x, y } = clockMarkPos(m, 60, 84)
+        clockAppend('circle', { cx: x, cy: y, r: 3, class: 'clock-dot' })
+      }
+    }
+    for (let m = 0; m < 60; m += 5) {
+      const { x, y } = clockMarkPos(m, 60, 78)
+      clockAppend('text', {
+        x, y, 'text-anchor': 'middle', 'dominant-baseline': 'central',
+        class: m === clockMinute ? 'clock-mark-text sel' : 'clock-mark-text'
+      }, m === 0 ? '00' : `${m}`)
+    }
+  }
+
+  clockAppend('circle', { cx, cy, r: 3, class: 'clock-center-dot' })
+}
+
+function updateClockDisplay(): void {
+  const isAm = clockHour24 < 12
+  const h12 = clockHour24 % 12 || 12
+  const minStr = String(clockMinute).padStart(2, '0')
+  clockTimeBtn.textContent = `${h12}:${minStr} ${isAm ? '上午' : '下午'}`
+  clockDispHour.textContent = String(h12)
+  clockDispMinute.textContent = minStr
+  btnAm.classList.toggle('active', isAm)
+  btnPm.classList.toggle('active', !isAm)
+  clockDispHour.classList.toggle('active', clockPhase === 'hour')
+  clockDispMinute.classList.toggle('active', clockPhase === 'minute')
+  clockPopupHint.textContent = clockPhase === 'hour' ? '點選選擇小時' : '點選選擇分鐘'
+  renderClockFace()
+}
+
+function setClockFromTimestamp(ts: number): void {
+  const date = new Date(ts)
+  const y = date.getFullYear()
+  const mo = String(date.getMonth() + 1).padStart(2, '0')
+  const d = String(date.getDate()).padStart(2, '0')
+  inputEventDate.value = `${y}-${mo}-${d}`
+  clockHour24 = date.getHours()
+  clockMinute = date.getMinutes()
+  clockPhase = 'hour'
+  updateClockDisplay()
+}
+
+function getClockTimestamp(): number {
+  const dateStr = inputEventDate.value
+  if (!dateStr) return NaN
+  const [y, mo, d] = dateStr.split('-').map(Number)
+  return new Date(y, mo - 1, d, clockHour24, clockMinute, 0, 0).getTime()
+}
+
+function openClockPopup(): void {
+  const rect = clockTimeBtn.getBoundingClientRect()
+  const popupWidth = 268
+  let left = rect.left
+  if (left + popupWidth > window.innerWidth - 8) left = window.innerWidth - popupWidth - 8
+  clockPopup.style.top = `${rect.bottom + 4}px`
+  clockPopup.style.left = `${left}px`
+  clockPhase = 'hour'
+  updateClockDisplay()
+  clockPopup.classList.remove('hidden')
+}
+
+function closeClockPopup(): void {
+  clockPopup.classList.add('hidden')
+}
+
+clockTimeBtn.addEventListener('click', (e) => {
+  e.stopPropagation()
+  clockPopup.classList.contains('hidden') ? openClockPopup() : closeClockPopup()
+})
+
+document.addEventListener('click', (e) => {
+  if (!clockPopup.classList.contains('hidden') &&
+      !clockPopup.contains(e.target as Node) &&
+      e.target !== clockTimeBtn) {
+    closeClockPopup()
+  }
+})
+
+btnAm.addEventListener('click', () => {
+  if (clockHour24 >= 12) clockHour24 -= 12
+  updateClockDisplay()
+})
+
+btnPm.addEventListener('click', () => {
+  if (clockHour24 < 12) clockHour24 += 12
+  updateClockDisplay()
+})
+
+clockDispHour.addEventListener('click', () => {
+  clockPhase = 'hour'
+  updateClockDisplay()
+})
+
+clockDispMinute.addEventListener('click', () => {
+  clockPhase = 'minute'
+  updateClockDisplay()
+})
+
+clockSvg.addEventListener('click', (e) => {
+  e.stopPropagation()  // renderClockFace() removes e.target from DOM, causing document handler to misfire
+  const rect = (clockSvg as Element).getBoundingClientRect()
+  const x = (e.clientX - rect.left) * (220 / rect.width)
+  const y = (e.clientY - rect.top) * (220 / rect.height)
+  const dx = x - 110, dy = y - 110
+  if (dx * dx + dy * dy < 400) return  // Too close to center (r < 20)
+  const angle = ((Math.atan2(dx, -dy) + 2 * Math.PI) % (2 * Math.PI))
+
+  if (clockPhase === 'hour') {
+    const h12Raw = Math.round(angle / (2 * Math.PI) * 12) % 12
+    const h12 = h12Raw === 0 ? 12 : h12Raw
+    const isAm = clockHour24 < 12
+    clockHour24 = isAm ? (h12 === 12 ? 0 : h12) : (h12 === 12 ? 12 : h12 + 12)
+    clockPhase = 'minute'
+    updateClockDisplay()
+  } else {
+    clockMinute = Math.round(angle / (2 * Math.PI) * 60) % 60
+    updateClockDisplay()
+    closeClockPopup()
+  }
+})
+
 function openEventsDialog(): void {
   selectEventAgent.innerHTML = ''
   selectMappingAgent.innerHTML = ''
@@ -1895,7 +2221,7 @@ function openEventsDialog(): void {
   })
   btnAddEvent.disabled = items.length === 0
   btnAddMapping.disabled = items.length === 0
-  inputEventTime.value = toDatetimeLocalValue(Date.now() + 5 * 60 * 1000)
+  setClockFromTimestamp(Date.now() + 5 * 60 * 1000)
   selectEventRecurrence.value = 'once'
   inputEventInterval.value = '1'
   selectEventIntervalUnit.value = 'minutes'
@@ -1982,6 +2308,7 @@ async function populatePresetDropdown(): Promise<void> {
   selectPreset.appendChild(builtinGroup)
 }
 
+
 /** 根據目前欄位值自動選取對應的下拉選項 */
 async function selectMatchingPreset(): Promise<void> {
   const userPresets = await loadUserPresets()
@@ -2031,6 +2358,54 @@ async function onPresetChange(): Promise<void> {
     inputApiBaseUrl.value = preset.apiBaseUrl
     inputApiKey.value = preset.apiKey
     inputModelName.value = preset.modelName
+  }
+}
+
+/** 將目前的 API 設定欄位值存回下拉選單選擇的 AI 模型群組 */
+async function saveCurrentFieldsToSelectedPreset(apiBaseUrl: string, apiKey: string, modelName: string): Promise<void> {
+  const value = selectPreset.value
+  if (!value) return // 「自訂」選項，不動作
+
+  if (value.startsWith('user:')) {
+    // 更新現有的使用者自訂群組
+    const idx = parseInt(value.slice(5), 10)
+    const userPresets = await loadUserPresets()
+    if (idx >= 0 && idx < userPresets.length) {
+      userPresets[idx].apiBaseUrl = apiBaseUrl
+      userPresets[idx].apiKey = apiKey
+      userPresets[idx].modelName = modelName
+      await saveUserPresets(userPresets)
+      await populatePresetDropdown()
+      selectPreset.value = `user:${idx}`
+    }
+  } else if (value.startsWith('builtin:')) {
+    // 內建群組不可修改，建立一個同名的使用者群組來覆蓋
+    const idx = parseInt(value.slice(8), 10)
+    const builtin = DEFAULT_PRESETS[idx]
+    if (!builtin) return
+
+    // 檢查欄位值是否與內建群組相同，若相同則無需建立使用者群組
+    if (builtin.apiBaseUrl === apiBaseUrl && builtin.apiKey === apiKey && builtin.modelName === modelName) return
+
+    const userPresets = await loadUserPresets()
+    const existingIdx = userPresets.findIndex((p) => p.name === builtin.name)
+
+    const newPreset: Preset = {
+      name: builtin.name,
+      apiBaseUrl,
+      apiKey,
+      modelName,
+    }
+
+    if (existingIdx >= 0) {
+      userPresets[existingIdx] = newPreset
+    } else {
+      userPresets.push(newPreset)
+    }
+
+    await saveUserPresets(userPresets)
+    await populatePresetDropdown()
+    selectPreset.value = `user:${existingIdx >= 0 ? existingIdx : userPresets.length - 1}`
   }
 }
 
@@ -2327,9 +2702,18 @@ async function loadGlobalSettings(): Promise<void> {
     globalEmbeddingModel = localStorage.getItem('global_embedding_model') || ''
   }
 
+  execFontSize = parseInt(localStorage.getItem('exec_font_size') || '13', 10)
+  applyFontSizes()
+
   inputEmbeddingBaseUrl.value = globalEmbeddingApiBaseUrl
   inputEmbeddingApiKey.value = globalEmbeddingApiKey
   inputEmbeddingModel.value = globalEmbeddingModel
+}
+
+/** 套用字體大小 CSS 變數 */
+function applyFontSizes(): void {
+  document.documentElement.style.setProperty('--exec-font-size', `${execFontSize}px`)
+  execFontSizeVal.textContent = `${execFontSize}px`
 }
 
 /** 儲存全域設定 */
@@ -2341,6 +2725,7 @@ async function saveGlobalSettings(): Promise<void> {
   localStorage.setItem('global_embedding_base_url', globalEmbeddingApiBaseUrl)
   localStorage.setItem('global_embedding_api_key', globalEmbeddingApiKey)
   localStorage.setItem('global_embedding_model', globalEmbeddingModel)
+  localStorage.setItem('exec_font_size', String(execFontSize))
 
   if (isTauri()) {
     try {
@@ -2361,6 +2746,7 @@ function openGlobalSettings(): void {
   inputEmbeddingBaseUrl.value = globalEmbeddingApiBaseUrl
   inputEmbeddingApiKey.value = globalEmbeddingApiKey
   inputEmbeddingModel.value = globalEmbeddingModel
+  applyFontSizes()
   globalSettingsOverlay.classList.remove('hidden')
 }
 
@@ -2426,6 +2812,9 @@ async function saveSettings(): Promise<void> {
     item.toolsSearch = inputToolsSearch.checked
   }
 
+  // 將 API 設定同步回下拉選單選擇的 AI 模型群組
+  await saveCurrentFieldsToSelectedPreset(apiBaseUrl, apiKey, modelName)
+
   await saveItems()
   closeSettingsDialog()
   renderList()
@@ -2442,7 +2831,31 @@ function sendMessageToAgent(): void {
   if (!val) return
 
   agentUserInput.value = ''
-  void runItem(selectedItemId, val)
+
+  if (runningItems.has(selectedItemId)) {
+    void invoke('send_agent_message', { itemId: selectedItemId, message: val })
+    const now = Date.now()
+    if (!itemLogs.has(selectedItemId)) itemLogs.set(selectedItemId, [])
+    const logs = itemLogs.get(selectedItemId)!
+    logs.push({
+      level: 'info',
+      message: `💬 使用者插話：\n${val}`,
+      timestamp: now,
+    })
+    if (!currentSessionExchanges.has(selectedItemId)) {
+      currentSessionExchanges.set(selectedItemId, [])
+    }
+    currentSessionExchanges.get(selectedItemId)!.push({
+      round: 0,
+      phase: 'user_input',
+      endpoint: '',
+      payload: { content: val },
+      timestamp: now,
+    })
+    renderMessageBox(selectedItemId)
+  } else {
+    void runItem(selectedItemId, val)
+  }
 }
 
 if (agentUserInput && btnSendMessage) {
@@ -2524,11 +2937,11 @@ function renderHttpAgentsList(): void {
 
 /** 新增一次性或循環排程事件 */
 btnAddEvent.addEventListener('click', async () => {
-  const triggerAt = new Date(inputEventTime.value).getTime()
+  const triggerAt = getClockTimestamp()
   const agentId = Number(selectEventAgent.value)
   if (!Number.isFinite(triggerAt) || triggerAt <= Date.now()) {
     window.alert('請選擇目前時間之後的觸發時間。')
-    inputEventTime.focus()
+    openClockPopup()
     return
   }
   if (!items.some((item) => item.id === agentId)) {
@@ -2550,7 +2963,7 @@ btnAddEvent.addEventListener('click', async () => {
   await saveScheduledEvents()
   renderScheduledEvents()
   renderList()
-  inputEventTime.value = toDatetimeLocalValue(Date.now() + 5 * 60 * 1000)
+  setClockFromTimestamp(Date.now() + 5 * 60 * 1000)
 })
 
 /** 新增自訂事件與 Agent 訂閱關聯 */
@@ -2599,6 +3012,10 @@ settingsOverlay.addEventListener('click', (e) => {
 btnGlobalSettings.addEventListener('click', openGlobalSettings)
 btnCloseGlobalSettings.addEventListener('click', closeGlobalSettings)
 btnGlobalSettingsCancel.addEventListener('click', closeGlobalSettings)
+
+const FONT_MIN = 10, FONT_MAX = 24
+btnExecFontInc.addEventListener('click', () => { execFontSize = Math.min(FONT_MAX, execFontSize + 1); applyFontSizes() })
+btnExecFontDec.addEventListener('click', () => { execFontSize = Math.max(FONT_MIN, execFontSize - 1); applyFontSizes() })
 btnGlobalSettingsSave.addEventListener('click', async () => {
   await saveGlobalSettings()
   closeGlobalSettings()
@@ -2694,8 +3111,8 @@ function onSplitterMouseMove(e: MouseEvent): void {
   const deltaY = splitterStartY - e.clientY // 向上拖為正值（擴大訊息框）
   const newHeight = splitterStartHeight + deltaY
 
-  // 限制範圍：最小 48px，最大 70vh
-  const maxHeight = window.innerHeight * 0.7
+  // 限制範圍：最小 48px，最大 90vh
+  const maxHeight = window.innerHeight * 0.9
   const clampedHeight = Math.max(48, Math.min(maxHeight, newHeight))
 
   messageBox.style.height = `${clampedHeight}px`
@@ -2771,6 +3188,17 @@ btnViewToggle.addEventListener('click', () => {
   } else if (selectedItemId !== null) {
     renderMessageBox(selectedItemId)
   }
+})
+
+// ============================================================
+// 卡片／列表檢視切換
+// ============================================================
+
+btnListViewToggle.addEventListener('click', () => {
+  listViewMode = listViewMode === 'card' ? 'list' : 'card'
+  updateListViewToggleUI()
+  try { localStorage.setItem(VIEW_MODE_KEY, listViewMode) } catch { /* ignore */ }
+  renderList()
 })
 
 // ============================================================
@@ -2876,7 +3304,7 @@ if (selectTheme) {
   const savedHeight = localStorage.getItem(SPLITTER_HEIGHT_KEY)
   if (savedHeight) {
     const h = parseInt(savedHeight, 10)
-    if (!isNaN(h) && h >= 48 && h <= window.innerHeight * 0.7) {
+    if (!isNaN(h) && h >= 48 && h <= window.innerHeight * 0.9) {
       messageBox.style.height = `${h}px`
     }
   }
@@ -2890,7 +3318,14 @@ if (selectTheme) {
     }
   }
 
+  // 還原使用者偏好的檢視模式
+  try {
+    const saved = localStorage.getItem(VIEW_MODE_KEY)
+    if (saved === 'card' || saved === 'list') listViewMode = saved
+  } catch { /* ignore */ }
+
   updateViewToggleUI()
+  updateListViewToggleUI()
   renderList()
   renderScheduledEvents()
   updateInputBoxState()

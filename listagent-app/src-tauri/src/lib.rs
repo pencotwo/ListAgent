@@ -77,6 +77,29 @@ fn agent_status() -> &'static std::sync::Mutex<AgentStatusSnapshot> {
     INSTANCE.get_or_init(|| std::sync::Mutex::new(AgentStatusSnapshot::default()))
 }
 
+fn pending_agent_messages() -> &'static std::sync::Mutex<HashMap<u32, Vec<String>>> {
+    static INSTANCE: std::sync::OnceLock<std::sync::Mutex<HashMap<u32, Vec<String>>>> = std::sync::OnceLock::new();
+    INSTANCE.get_or_init(|| std::sync::Mutex::new(HashMap::new()))
+}
+
+#[tauri::command]
+#[allow(non_snake_case)]
+fn send_agent_message(itemId: u32, message: String) {
+    println!(">>> backend received send_agent_message: itemId={}, message='{}'", itemId, message);
+    if let Ok(mut map) = pending_agent_messages().lock() {
+        map.entry(itemId).or_default().push(message);
+    }
+}
+
+/// 將 var_name 視為環境變數名稱，讀取對應的值。
+fn resolve_env_key(var_name: &str) -> String {
+    let trimmed = var_name.trim();
+    if trimmed.is_empty() {
+        return String::new();
+    }
+    std::env::var(trimmed).unwrap_or_default()
+}
+
 #[tauri::command]
 fn update_agent_status(
     running: Vec<String>,
@@ -2106,11 +2129,37 @@ async fn execute_agent_with_tools(
     let mut round_index = 0usize;
     while round_index < MAX_TOOL_ITERATIONS {
         let round = round_index + 1;
-        let tool_choice = if execution_logs.is_empty() && tool_choice_required {
+        let tool_choice = if execution_logs.is_empty() && tool_choice_required && round == 1 {
             "required"
         } else {
             "auto"
         };
+        // Check for any pending user messages to inject
+        let mut inserted_msgs = Vec::new();
+        if let Ok(mut map) = pending_agent_messages().lock() {
+            if let Some(msgs) = map.get_mut(&request.item_id) {
+                if !msgs.is_empty() {
+                    inserted_msgs = msgs.drain(..).collect::<Vec<_>>();
+                }
+            }
+        }
+        if !inserted_msgs.is_empty() {
+            for msg in inserted_msgs {
+                messages.push(serde_json::json!({
+                    "role": "user",
+                    "content": msg
+                }));
+                emit_model_exchange(
+                    app_handle,
+                    request,
+                    round,
+                    "user_input",
+                    &endpoint,
+                    serde_json::json!({ "content": msg }),
+                );
+            }
+        }
+
         let active_tools = build_active_tools(&unlocked_tools);
         let mut body = serde_json::json!({
             "model": request.model_name,
@@ -2234,21 +2283,30 @@ async fn execute_agent_with_tools(
             .unwrap_or_default();
 
         if tool_calls.is_empty() {
-            let content = message
-                .get("content")
-                .and_then(Value::as_str)
-                .unwrap_or_default()
-                .to_string();
-            return Ok(AgentExecutionResult {
-                endpoint,
-                content: if content.is_empty() {
-                    serde_json::to_string_pretty(&message).unwrap_or(response_body)
-                } else {
-                    content
-                },
-                stats: latest_stats,
-                tool_calls: execution_logs,
-            });
+            let has_pending = if let Ok(map) = pending_agent_messages().lock() {
+                map.get(&request.item_id).map(|msgs| !msgs.is_empty()).unwrap_or(false)
+            } else {
+                false
+            };
+            if !has_pending {
+                let content = message
+                    .get("content")
+                    .and_then(Value::as_str)
+                    .unwrap_or_default()
+                    .to_string();
+                return Ok(AgentExecutionResult {
+                    endpoint,
+                    content: if content.is_empty() {
+                        serde_json::to_string_pretty(&message).unwrap_or(response_body)
+                    } else {
+                        content
+                    },
+                    stats: latest_stats,
+                    tool_calls: execution_logs,
+                });
+            } else {
+                println!(">>> execute_agent_with_tools: tool_calls is empty, but pending user messages exist! Continuing conversation loop.");
+            }
         }
 
         messages.push(message);
@@ -2395,6 +2453,12 @@ async fn execute_agent(
     app_handle: tauri::AppHandle,
     request: AgentExecutionRequest,
 ) -> Result<AgentExecutionResult, String> {
+    if let Ok(mut map) = pending_agent_messages().lock() {
+        map.remove(&request.item_id);
+    }
+    let mut request = request;
+    request.api_key = resolve_env_key(&request.api_key);
+    request.embedding_api_key = resolve_env_key(&request.embedding_api_key);
     let base_url = request.api_base_url.trim().trim_end_matches('/');
     if base_url.is_empty() {
         return Err("尚未設定 API URL".to_string());
@@ -2424,8 +2488,12 @@ async fn execute_agent(
         || request.mcp_servers.iter().any(|s| s.enabled)
         || request.tools_search
     {
-        return execute_agent_with_tools(&app_handle, &request, base_url, input, has_parameters)
+        let res = execute_agent_with_tools(&app_handle, &request, base_url, input, has_parameters)
             .await;
+        if let Ok(mut map) = pending_agent_messages().lock() {
+            map.remove(&request.item_id);
+        }
+        return res;
     }
 
     let has_user_prompt = has_parameters && !request.prompt.trim().is_empty();
@@ -2572,6 +2640,10 @@ async fn execute_agent(
             .to_string();
         clean_assistant_content(&raw)
     };
+
+    if let Ok(mut map) = pending_agent_messages().lock() {
+        map.remove(&request.item_id);
+    }
 
     Ok(AgentExecutionResult {
         endpoint,
@@ -3164,7 +3236,8 @@ pub fn run() {
             read_session_file,
             list_skills,
             list_mcp_server_tools,
-            update_agent_status
+            update_agent_status,
+            send_agent_message
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

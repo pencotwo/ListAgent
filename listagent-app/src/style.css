@@ -3,6 +3,9 @@
    ============================================================ */
 
 :root {
+  --exec-font-size: 13px;
+  --session-font-size: 13px;
+
   /* 色調 */
   --bg-primary: #f8f9fb;
   --bg-surface: #ffffff;
@@ -129,16 +132,36 @@ body {
 }
 
 #btn-events,
-#btn-global-settings {
+#btn-global-settings,
+#btn-list-view-toggle {
   border: 1px solid var(--border);
   font-size: 16px;
 }
 
 #btn-events:hover,
-#btn-global-settings:hover {
+#btn-global-settings:hover,
+#btn-list-view-toggle:hover {
   border-color: var(--accent);
   background: var(--accent-light);
   transform: scale(1.08);
+}
+
+#btn-list-view-toggle {
+  width: 36px;
+  height: 36px;
+  border-radius: 50%;
+  background: transparent;
+  color: var(--accent);
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.2s ease;
+}
+
+#btn-list-view-toggle.active {
+  background: var(--accent-light);
+  border-color: var(--accent);
 }
 
 /* '+' 按鈕 */
@@ -193,6 +216,156 @@ body {
   grid-template-columns: minmax(210px, 1.25fr) minmax(120px, 1fr) minmax(100px, 0.8fr) auto;
   align-items: end;
   gap: 10px;
+}
+
+/* Clock Picker */
+.clock-inputs-row {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+}
+
+.clock-date-input {
+  flex: 1;
+  min-width: 0;
+}
+
+.clock-time-btn {
+  flex-shrink: 0;
+  padding: 6px 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg-surface);
+  color: var(--text-primary);
+  font-size: 13px;
+  font-family: var(--mono);
+  font-weight: 600;
+  cursor: pointer;
+  white-space: nowrap;
+  transition: border-color 0.15s, box-shadow 0.15s;
+}
+
+.clock-time-btn:hover {
+  border-color: var(--border-focus);
+  box-shadow: 0 0 0 2px var(--accent-light);
+}
+
+.clock-popup {
+  position: fixed;
+  z-index: 9999;
+  background: var(--bg-surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  box-shadow: var(--shadow-lg);
+  padding: 16px;
+  width: 268px;
+  user-select: none;
+}
+
+.clock-popup-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 14px;
+}
+
+.clock-ampm-toggle {
+  display: flex;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  overflow: hidden;
+}
+
+.ampm-btn {
+  padding: 5px 11px;
+  border: none;
+  background: transparent;
+  color: var(--text-secondary);
+  font-size: 13px;
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s;
+  font-family: var(--sans);
+}
+
+.ampm-btn.active {
+  background: var(--accent);
+  color: #fff;
+}
+
+.clock-time-display {
+  display: flex;
+  align-items: baseline;
+  gap: 1px;
+  font-size: 30px;
+  font-family: var(--mono);
+  font-weight: 700;
+  line-height: 1;
+}
+
+.clock-disp-part {
+  cursor: pointer;
+  padding: 2px 4px;
+  border-radius: 4px;
+  color: var(--text-muted);
+  transition: color 0.15s;
+  min-width: 1.3em;
+  text-align: center;
+}
+
+.clock-disp-part.active {
+  color: var(--accent);
+}
+
+.clock-disp-sep {
+  color: var(--text-muted);
+  margin: 0 1px;
+}
+
+.clock-svg {
+  display: block;
+  width: 236px;
+  height: 236px;
+  cursor: pointer;
+}
+
+/* SVG clock elements (styled via CSS classes) */
+.clock-face-bg {
+  fill: var(--bg-hover);
+}
+
+.clock-hand {
+  stroke: var(--accent);
+  stroke-width: 2;
+  stroke-linecap: round;
+}
+
+.clock-center-dot {
+  fill: var(--accent);
+}
+
+.clock-mark-sel {
+  fill: var(--accent);
+}
+
+.clock-mark-text {
+  fill: var(--text-primary);
+  font-size: 14px;
+  pointer-events: none;
+}
+
+.clock-mark-text.sel {
+  fill: #fff;
+}
+
+.clock-dot {
+  fill: var(--text-muted);
+}
+
+.clock-popup-hint {
+  text-align: center;
+  font-size: 11px;
+  color: var(--text-muted);
+  margin: 10px 0 0;
 }
 
 .event-mapping-create-grid {
@@ -610,6 +783,199 @@ body {
 }
 
 /* ============================================================
+   卡片網格佈局（Card Grid Layout）— 16:9 寬高比
+   ============================================================ */
+
+#list-container.card-layout {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
+  gap: 12px;
+  align-content: start;
+}
+
+#list-container.card-layout .item-card {
+  aspect-ratio: 16 / 9;
+  flex-direction: column;
+  align-items: stretch;
+  padding: 14px 16px 12px;
+  gap: 6px;
+  position: relative;
+  overflow: hidden;
+}
+
+/* 卡片頂部：圖示列 */
+#list-container.card-layout .item-card .card-icons-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex-shrink: 0;
+}
+
+/* 卡片中間：名稱 + 描述 */
+#list-container.card-layout .item-card .item-info {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+  overflow: hidden;
+}
+
+#list-container.card-layout .item-card .item-name {
+  font-size: 16px;
+  font-weight: 700;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+#list-container.card-layout .item-card .item-meta {
+  font-size: 12px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  white-space: normal;
+  line-height: 1.4;
+}
+
+/* 卡片底部：spinners + run 按鈕 */
+#list-container.card-layout .item-card .card-bottom-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  flex-shrink: 0;
+  margin-top: auto;
+}
+
+#list-container.card-layout .item-card .card-bottom-row .run-spinners {
+  margin-right: 0;
+}
+
+/* 齒輪按鈕定位到右上角 */
+#list-container.card-layout .item-card .btn-gear {
+  position: absolute;
+  top: 8px;
+  right: 8px;
+  opacity: 0;
+  z-index: 2;
+}
+
+#list-container.card-layout .item-card .btn-gear.visible {
+  opacity: 1;
+}
+
+/* 執行按鈕在卡片模式微調 */
+#list-container.card-layout .item-card .btn-run {
+  margin-right: 0;
+}
+
+/* 卡片 hover 時仍保持原有動畫 */
+#list-container.card-layout .item-card:hover {
+  border-color: var(--accent);
+  box-shadow: var(--shadow-md);
+  transform: translateY(-2px);
+}
+
+#list-container.card-layout .item-card:active {
+  transform: scale(0.99);
+}
+
+/* 卡片執行中樣式微調 */
+#list-container.card-layout .item-card.has-running-agent {
+  border-left: 3px solid var(--accent);
+  background: linear-gradient(135deg, var(--accent-light) 0%, transparent 15%);
+}
+
+#list-container.card-layout .item-card.selected {
+  border-color: var(--accent);
+  background: var(--accent-light);
+  box-shadow: 0 0 0 3px var(--accent-light);
+}
+
+/* 主題覆寫：只針對 card-layout 內的 .item-card */
+body.theme-glass-neon #list-container.card-layout .item-card {
+  background: rgba(22, 19, 48, 0.45);
+  backdrop-filter: blur(10px);
+  border-color: rgba(255, 255, 255, 0.08);
+}
+body.theme-glass-neon #list-container.card-layout .item-card:hover {
+  border-color: var(--border-focus);
+  box-shadow: 0 0 16px rgba(0, 242, 254, 0.15);
+  transform: translateY(-2px);
+}
+body.theme-glass-neon #list-container.card-layout .item-card.selected {
+  border-color: var(--accent);
+  background: rgba(189, 0, 255, 0.15);
+  box-shadow: 0 0 20px rgba(189, 0, 255, 0.25);
+}
+
+/* ============================================================
+   列表檢視（List View）
+   ============================================================ */
+
+.item-list-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 14px;
+  background: var(--bg-surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  cursor: pointer;
+  transition: all 0.15s ease;
+  user-select: none;
+}
+
+.item-list-row:hover {
+  border-color: var(--accent);
+  background: var(--bg-hover);
+}
+
+.item-list-row .item-name {
+  font-size: 14px;
+}
+
+.item-list-row .item-meta {
+  font-size: 11px;
+}
+
+.item-list-row .btn-run {
+  width: 28px;
+  height: 28px;
+  font-size: 12px;
+  border-width: 1.5px;
+  margin-right: 0;
+}
+
+.item-list-row .btn-gear {
+  width: 26px;
+  height: 26px;
+  font-size: 14px;
+}
+
+.item-list-row .run-spinner {
+  width: 14px;
+  height: 14px;
+}
+
+.item-list-row.has-running-agent {
+  border-left: 3px solid var(--accent);
+  background: linear-gradient(90deg, var(--accent-light) 0%, transparent 8%);
+}
+
+.item-list-row.selected {
+  border-color: var(--accent);
+  background: var(--accent-light);
+  box-shadow: 0 0 0 2px var(--accent-light);
+}
+
+.item-list-row.selected .item-name {
+  color: var(--accent);
+}
+
+/* ============================================================
    空狀態
    ============================================================ */
 
@@ -930,6 +1296,7 @@ body {
 }
 
 /* Skills fieldset */
+.font-size-group,
 .skill-group,
 .embedding-group {
   min-width: 0;
@@ -940,12 +1307,59 @@ body {
   background: var(--bg-surface);
 }
 
+.font-size-group legend,
 .skill-group legend,
 .embedding-group legend {
   padding: 0 8px;
   color: var(--text-secondary);
   font-size: 13px;
   font-weight: 600;
+}
+
+.font-size-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 6px 0;
+}
+
+.font-size-row + .font-size-row {
+  border-top: 1px solid var(--border);
+}
+
+.font-size-ctrl {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.font-size-btn {
+  width: 28px;
+  height: 28px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--bg-hover);
+  color: var(--text-primary);
+  font-size: 16px;
+  line-height: 1;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: background 0.15s, border-color 0.15s;
+}
+
+.font-size-btn:hover {
+  background: var(--accent-light);
+  border-color: var(--border-focus);
+}
+
+.font-size-val {
+  min-width: 36px;
+  text-align: center;
+  font-family: var(--mono);
+  font-size: 13px;
+  color: var(--text-primary);
 }
 
 .skill-list {
@@ -1217,7 +1631,7 @@ body {
   flex-direction: row;
   height: 250px;
   min-height: 48px;
-  max-height: 70vh;
+  max-height: 90vh;
   overflow: hidden;
   transition: height 0.05s ease;
 }
@@ -1276,6 +1690,7 @@ body {
   flex-direction: column;
   gap: 1px;
   padding: 4px 0;
+  font-size: var(--session-font-size);
   scrollbar-width: thin;
   scrollbar-color: rgba(255, 255, 255, 0.25) transparent;
 }
@@ -1494,7 +1909,7 @@ body {
   overflow-y: auto;
   padding: 10px 16px;
   font-family: var(--mono);
-  font-size: 12px;
+  font-size: var(--exec-font-size);
   line-height: 1.7;
   color: #e0e7ff;
   display: flex;
