@@ -21,6 +21,8 @@ fn default_max_rounds() -> u32 {
 }
 const MAX_TOOL_FILE_SIZE: u64 = 1024 * 1024;
 const MAX_SEARCH_RESULTS: usize = 200;
+const MAX_SEARCH_FILES: usize = 5000;
+const MAX_SEARCH_DURATION_MS: u64 = 8000;
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 #[serde(rename_all = "camelCase")]
@@ -753,7 +755,7 @@ fn tool_definitions(selected: &[String]) -> Result<Vec<Value>, String> {
                 "type": "function",
                 "function": {
                     "name": "search_content",
-                    "description": "Recursively search UTF-8 file contents in the workspace.",
+                    "description": "Recursively search UTF-8 file contents in the workspace. This searches inside files, not filenames. To locate or run a known script such as build.bat, prefer list_directory or execute_command.",
                     "parameters": {
                         "type": "object",
                         "properties": {
@@ -1401,14 +1403,46 @@ async fn perform_execute_command_streaming(
     .to_string())
 }
 
+struct SearchContentState {
+    files_scanned: usize,
+    truncated: bool,
+    started_at: std::time::Instant,
+}
+
+impl SearchContentState {
+    fn new() -> Self {
+        Self {
+            files_scanned: 0,
+            truncated: false,
+            started_at: std::time::Instant::now(),
+        }
+    }
+
+    fn should_stop(&mut self, matches: &[Value]) -> bool {
+        if matches.len() >= MAX_SEARCH_RESULTS
+            || self.files_scanned >= MAX_SEARCH_FILES
+            || self.started_at.elapsed()
+                >= std::time::Duration::from_millis(MAX_SEARCH_DURATION_MS)
+        {
+            self.truncated = matches.len() >= MAX_SEARCH_RESULTS
+                || self.files_scanned >= MAX_SEARCH_FILES
+                || self.started_at.elapsed()
+                    >= std::time::Duration::from_millis(MAX_SEARCH_DURATION_MS);
+            return true;
+        }
+        false
+    }
+}
+
 fn search_file_content(
     root: &Path,
     path: &Path,
     query: &str,
     case_sensitive: bool,
     matches: &mut Vec<Value>,
+    state: &mut SearchContentState,
 ) {
-    if matches.len() >= MAX_SEARCH_RESULTS {
+    if state.should_stop(matches) {
         return;
     }
     let Ok(metadata) = fs::metadata(path) else {
@@ -1419,19 +1453,23 @@ fn search_file_content(
             return;
         };
         for entry in entries.flatten() {
+            if state.should_stop(matches) {
+                break;
+            }
             let Ok(canonical) = entry.path().canonicalize() else {
                 continue;
             };
             if canonical.starts_with(root) {
-                search_file_content(root, &canonical, query, case_sensitive, matches);
-            }
-            if matches.len() >= MAX_SEARCH_RESULTS {
-                break;
+                search_file_content(root, &canonical, query, case_sensitive, matches, state);
             }
         }
         return;
     }
     if !metadata.is_file() || metadata.len() > MAX_TOOL_FILE_SIZE {
+        return;
+    }
+    state.files_scanned += 1;
+    if state.should_stop(matches) {
         return;
     }
     let Ok(content) = fs::read_to_string(path) else {
@@ -1454,7 +1492,7 @@ fn search_file_content(
                 "line": index + 1,
                 "text": line
             }));
-            if matches.len() >= MAX_SEARCH_RESULTS {
+            if state.should_stop(matches) {
                 break;
             }
         }
@@ -1506,6 +1544,7 @@ fn execute_tool(
                 arguments.get("path").and_then(Value::as_str).unwrap_or("."),
             )?;
             let mut matches = Vec::new();
+            let mut state = SearchContentState::new();
             search_file_content(
                 root,
                 &path,
@@ -1515,8 +1554,19 @@ fn execute_tool(
                     .and_then(Value::as_bool)
                     .unwrap_or(false),
                 &mut matches,
+                &mut state,
             );
-            serde_json::to_string(&matches).map_err(|error| error.to_string())
+            let result = serde_json::json!({
+                "matches": matches,
+                "files_scanned": state.files_scanned,
+                "truncated": state.truncated,
+                "warning": if state.truncated {
+                    Some(format!("search_content stopped after scanning {} files, {}ms, or {} matches. This tool searches file contents, not filenames. For known scripts such as build.bat, call execute_command directly.", MAX_SEARCH_FILES, MAX_SEARCH_DURATION_MS, MAX_SEARCH_RESULTS))
+                } else {
+                    None
+                }
+            });
+            serde_json::to_string(&result).map_err(|error| error.to_string())
         }
         "read_file" => {
             let path = resolve_existing_tool_path(root, required_string(arguments, "path")?)?;
@@ -2862,6 +2912,7 @@ async fn execute_agent_with_tools(
 {now_line}\n\
 {workspace_line}\n\
 When the user asks you to build, run, test, execute, fix, modify, or verify something in the workspace, you must use tools to actually perform the task. Do not stop after giving instructions or a guide unless the user explicitly asks only for instructions.\n\
+If the user asks you to execute a known command or script name such as build.bat, run it directly with execute_command from the workspace root. Do not use search_content to find script filenames; search_content searches inside files and can be expensive on large trees.\n\
 For long-running build commands, call execute_command with an explicit timeout_seconds value large enough for the build, such as 1800 to 7200 seconds.\n\
 After each tool result, follow its next_step if present. When a successful command completes the user's requested build/run/test/verification, stop calling tools and give the final result."
         )
