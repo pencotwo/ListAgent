@@ -99,6 +99,13 @@
             <button type="button" id="btn-copy-agent-id" class="btn btn-small" title="複製 Agent ID">📋 複製</button>
           </div>
 
+          <!-- 工作目錄 -->
+          <label class="form-label" for="input-working-directory">工作目錄</label>
+          <div style="display:flex;gap:6px;align-items:stretch">
+            <input type="text" id="input-working-directory" class="form-input" placeholder="例如 D:\Projects\MyProject（留空使用 App 工作目錄）" style="flex:1" />
+            <button id="btn-select-working-directory" class="btn btn-small" type="button" title="選擇工作目錄" aria-label="選擇工作目錄">📁 選擇</button>
+          </div>
+
           <!-- Prompt 設定 -->
           <label class="form-label" for="input-prompt">Prompt</label>
           <textarea id="input-prompt" class="form-textarea" rows="5" placeholder="輸入系統提示詞；可使用 {arg1}、{arg2}、{arg3}…"></textarea>
@@ -126,12 +133,6 @@
             </div>
           </fieldset>
 
-          <label class="form-label" for="input-working-directory">工作目錄</label>
-          <div class="workspace-row">
-            <input type="text" id="input-working-directory" class="form-input" placeholder="例如 D:\Projects\MyProject（留空使用 App 工作目錄）" />
-            <button id="btn-select-working-directory" class="btn btn-directory" type="button" title="選擇工作目錄" aria-label="選擇工作目錄">📁</button>
-          </div>
-
           <fieldset class="tool-group">
             <legend>Agent Tools</legend>
             <div class="tool-grid">
@@ -144,6 +145,7 @@
               <label class="tool-option"><input type="checkbox" name="agent-tool" value="web_search" /> web_search</label>
               <label class="tool-option"><input type="checkbox" name="agent-tool" value="fetch_url" /> fetch_url</label>
               <label class="tool-option"><input type="checkbox" name="agent-tool" value="get_current_time" /> get_current_time</label>
+              <label class="tool-option"><input type="checkbox" name="agent-tool" value="execute_command" /> execute_command</label>
             </div>
             <div id="mcp-tool-section" class="mcp-tool-section"></div>
             <div class="mcp-tool-actions">
@@ -189,6 +191,10 @@
             <button id="btn-add-mcp" class="btn btn-small" type="button">＋ 新增 MCP Server</button>
             <p class="mcp-hint">MCP Server 提供的工具會自動加入 AI 工具集。<br>stdio 指令範例：<code>npx -y @modelcontextprotocol/server-filesystem .</code></p>
           </fieldset>
+
+          <div class="agent-danger-actions">
+            <button id="btn-delete" class="btn btn-danger" type="button">🗑️ 刪除 Agent</button>
+          </div>
         </div>
 
         <div class="dialog-footer">

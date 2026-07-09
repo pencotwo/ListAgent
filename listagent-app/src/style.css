@@ -1195,24 +1195,6 @@ body.theme-glass-neon #list-container.card-layout .item-card.selected {
   text-transform: uppercase;
 }
 
-.workspace-row {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-}
-
-.workspace-row .form-input {
-  flex: 1;
-  min-width: 0;
-}
-
-.btn-directory {
-  flex: 0 0 42px;
-  width: 42px;
-  height: 38px;
-  padding: 0;
-  font-size: 18px;
-}
 
 .tool-grid {
   display: grid;
@@ -1513,6 +1495,12 @@ body.theme-glass-neon #list-container.card-layout .item-card.selected {
   line-height: 1.5;
 }
 
+.agent-danger-actions {
+  display: flex;
+  justify-content: flex-end;
+  margin-top: 12px;
+}
+
 .mcp-hint code {
   background: var(--bg-input);
   padding: 1px 4px;
@@ -1565,6 +1553,17 @@ body.theme-glass-neon #list-container.card-layout .item-card.selected {
 .btn-secondary:hover {
   background: var(--bg-hover);
   color: var(--text-primary);
+}
+
+.btn-danger {
+  background: var(--danger, #ef4444);
+  color: #fff;
+  border-color: var(--danger, #ef4444);
+}
+
+.btn-danger:hover {
+  background: #dc2626;
+  border-color: #dc2626;
 }
 
 .btn-small {
@@ -2144,6 +2143,41 @@ body.theme-glass-neon #list-container.card-layout .item-card.selected {
   padding: 1px 4px;
   border-radius: 3px;
   font-size: 0.92em;
+}
+
+.command-output-box {
+  margin: 6px 0;
+  border: 1px solid rgba(148, 163, 184, 0.28);
+  border-radius: 6px;
+  background: #020617;
+  color: #d1fae5;
+  overflow: hidden;
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.03);
+}
+
+.command-output-title {
+  padding: 6px 10px;
+  border-bottom: 1px solid rgba(148, 163, 184, 0.2);
+  color: #93c5fd;
+  background: rgba(15, 23, 42, 0.92);
+  font-family: var(--mono);
+  font-size: 11px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.command-output-body {
+  padding: 8px 10px;
+  font-family: var(--mono);
+  font-size: 12px;
+  line-height: 1.45;
+  white-space: pre-wrap;
+  word-break: break-all;
+}
+
+.command-output-muted {
+  color: #64748b;
 }
 
 @media (prefers-color-scheme: light) {
@@ -3328,5 +3362,3 @@ body.theme-vaporwave .btn-primary:hover {
   color: #000;
   box-shadow: 0 0 10px var(--accent-hover);
 }
-
-

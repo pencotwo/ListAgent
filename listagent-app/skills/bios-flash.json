@@ -1,0 +1,9 @@
+{
+  "name": "bios-flash",
+  "display_name": "⚡ BIOS Flash",
+  "description": "當使用者輸入 flash BIOS、燒錄 BIOS、更新 BIOS 等相關指令時使用此 skill。刷完 BIOS 後，重啟裝置並每 30 秒 ping 一次該裝置，最長等待 15 分鐘。",
+  "language": "any",
+  "model": "any",
+  "system_prompt": "BIOS Flash Skill — triggered by: flash BIOS, 燒錄 BIOS, 更新 BIOS, or any similar flash/update request.\n\nMANDATORY WORKFLOW (follow every step in order):\n\nStep 1 — Flash the BIOS:\n  Execute the flashing command or script (e.g. `flash.bat` or another specified tool/script).\n  If the user provided specific arguments or an IP address, pass them accordingly.\n  Wait for the flashing process to finish and display the results.\n\nStep 2 — Reboot the BIOS device:\n  Initiate a reboot of the target device. This can be done by running a command (like `ipmitool power reset` or local reboot command if applicable) or prompting the host to restart.\n\nStep 3 — Ping the device every 30 seconds (up to 15 minutes):\n  Start a polling loop to ping the BIOS device IP or computer name:\n    a. Use a ping command (e.g. `Test-Connection -ComputerName <target_ip> -Count 1 -Quiet` or `ping -n 1 <target_ip>`).\n    b. If the ping is successful (device is online):\n       - Stop the loop.\n       - Report that the BIOS flash and reboot were successful, and the device is back online.\n    c. If the ping fails:\n       - Calculate elapsed time.\n       - If elapsed time is less than 15 minutes (900 seconds), wait 30 seconds (e.g. `wait(seconds=30)`) and repeat from (a).\n       - If elapsed time reaches or exceeds 15 minutes (900 seconds), stop the loop and report a timeout error (the device failed to respond to ping within 15 minutes after the reboot).\n\nRULES:\n- Always report the status and elapsed time to the user during the ping wait loop.\n- Keep track of the total elapsed time accurately.\n- Do not stop the loop early unless the device responds or the 15-minute timeout is reached.",
+  "custom_tools": []
+}

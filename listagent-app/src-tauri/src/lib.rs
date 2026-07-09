@@ -14,7 +14,11 @@ const HTTP_SERVER_ADDRESS: &str = "127.0.0.1:37123";
 const MAX_REQUEST_BODY_SIZE: usize = 1024 * 1024;
 const MAX_QUEUED_INPUTS: usize = 1000;
 const MAX_TOOL_ITERATIONS: usize = 30;
-fn default_max_rounds() -> u32 { 100 }
+const DEFAULT_COMMAND_TIMEOUT_SECONDS: u64 = 30;
+const MAX_COMMAND_TIMEOUT_SECONDS: u64 = 7200;
+fn default_max_rounds() -> u32 {
+    100
+}
 const MAX_TOOL_FILE_SIZE: u64 = 1024 * 1024;
 const MAX_SEARCH_RESULTS: usize = 200;
 
@@ -22,71 +26,128 @@ const MAX_SEARCH_RESULTS: usize = 200;
 #[serde(rename_all = "camelCase")]
 pub struct HttpInput {
     #[serde(default)]
-    pub agent: String,             // Item name (backward compat / human-readable)
+    pub agent: String, // Item name (backward compat / human-readable)
     #[serde(default, rename = "agentId")]
-    pub agent_id: String,          // Stable, unique per-item identifier (preferred)
+    pub agent_id: String, // Stable, unique per-item identifier (preferred)
     #[serde(default)]
-    pub action: String,            // "run" (default) | "get_status" | "list_agents"
+    pub action: String, // "run" (default) | "get_status" | "list_agents"
     #[serde(default, rename = "execId")]
-    pub exec_id: String,           // Client-supplied ID for correlating request → agent execution
+    pub exec_id: String, // Client-supplied ID for correlating request → agent execution
     #[serde(default, alias = "params", alias = "input")]
     pub parameters: Value,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
 pub struct AgentTaskDetail {
-    #[serde(rename = "currentRound", skip_serializing_if = "Option::is_none", default)]
+    #[serde(
+        rename = "currentRound",
+        skip_serializing_if = "Option::is_none",
+        default
+    )]
     pub current_round: Option<u32>,
-    #[serde(rename = "currentTokens", skip_serializing_if = "Option::is_none", default)]
+    #[serde(
+        rename = "currentTokens",
+        skip_serializing_if = "Option::is_none",
+        default
+    )]
     pub current_tokens: Option<u64>,
-    #[serde(rename = "lastEndedAt", skip_serializing_if = "Option::is_none", default)]
+    #[serde(
+        rename = "lastEndedAt",
+        skip_serializing_if = "Option::is_none",
+        default
+    )]
     pub last_ended_at: Option<u64>,
-    #[serde(rename = "lastSuccess", skip_serializing_if = "Option::is_none", default)]
+    #[serde(
+        rename = "lastSuccess",
+        skip_serializing_if = "Option::is_none",
+        default
+    )]
     pub last_success: Option<bool>,
-    #[serde(rename = "lastContentPreview", skip_serializing_if = "Option::is_none", default)]
+    #[serde(
+        rename = "lastContentPreview",
+        skip_serializing_if = "Option::is_none",
+        default
+    )]
     pub last_content_preview: Option<String>,
-    #[serde(rename = "lastTokens", skip_serializing_if = "Option::is_none", default)]
+    #[serde(
+        rename = "lastTokens",
+        skip_serializing_if = "Option::is_none",
+        default
+    )]
     pub last_tokens: Option<u64>,
-    #[serde(rename = "lastRounds", skip_serializing_if = "Option::is_none", default)]
+    #[serde(
+        rename = "lastRounds",
+        skip_serializing_if = "Option::is_none",
+        default
+    )]
     pub last_rounds: Option<u32>,
-    #[serde(rename = "currentExecId", skip_serializing_if = "Option::is_none", default)]
+    #[serde(
+        rename = "currentExecId",
+        skip_serializing_if = "Option::is_none",
+        default
+    )]
     pub current_exec_id: Option<String>,
-    #[serde(rename = "lastExecId", skip_serializing_if = "Option::is_none", default)]
+    #[serde(
+        rename = "lastExecId",
+        skip_serializing_if = "Option::is_none",
+        default
+    )]
     pub last_exec_id: Option<String>,
-    #[serde(rename = "lastSessionPath", skip_serializing_if = "Option::is_none", default)]
+    #[serde(
+        rename = "lastSessionPath",
+        skip_serializing_if = "Option::is_none",
+        default
+    )]
     pub last_session_path: Option<String>,
-    #[serde(rename = "lastSessionUrl", skip_serializing_if = "Option::is_none", default)]
+    #[serde(
+        rename = "lastSessionUrl",
+        skip_serializing_if = "Option::is_none",
+        default
+    )]
     pub last_session_url: Option<String>,
-    #[serde(rename = "lastPromptTokens", skip_serializing_if = "Option::is_none", default)]
+    #[serde(
+        rename = "lastPromptTokens",
+        skip_serializing_if = "Option::is_none",
+        default
+    )]
     pub last_prompt_tokens: Option<u64>,
-    #[serde(rename = "lastCachedTokens", skip_serializing_if = "Option::is_none", default)]
+    #[serde(
+        rename = "lastCachedTokens",
+        skip_serializing_if = "Option::is_none",
+        default
+    )]
     pub last_cached_tokens: Option<u64>,
 }
 
 #[derive(Debug, Clone, Default, Serialize)]
 pub struct AgentStatusSnapshot {
-    pub running: Vec<String>,                 // agent names currently running
-    pub queued: HashMap<String, u32>,         // agent name → queue length
+    pub running: Vec<String>,         // agent names currently running
+    pub queued: HashMap<String, u32>, // agent name → queue length
     #[serde(default)]
-    pub detail: HashMap<String, AgentTaskDetail>,  // agent name → task detail
+    pub detail: HashMap<String, AgentTaskDetail>, // agent name → task detail
     #[serde(rename = "updatedAt")]
     pub updated_at: u64,
 }
 
 fn agent_status() -> &'static std::sync::Mutex<AgentStatusSnapshot> {
-    static INSTANCE: std::sync::OnceLock<std::sync::Mutex<AgentStatusSnapshot>> = std::sync::OnceLock::new();
+    static INSTANCE: std::sync::OnceLock<std::sync::Mutex<AgentStatusSnapshot>> =
+        std::sync::OnceLock::new();
     INSTANCE.get_or_init(|| std::sync::Mutex::new(AgentStatusSnapshot::default()))
 }
 
 fn pending_agent_messages() -> &'static std::sync::Mutex<HashMap<u32, Vec<String>>> {
-    static INSTANCE: std::sync::OnceLock<std::sync::Mutex<HashMap<u32, Vec<String>>>> = std::sync::OnceLock::new();
+    static INSTANCE: std::sync::OnceLock<std::sync::Mutex<HashMap<u32, Vec<String>>>> =
+        std::sync::OnceLock::new();
     INSTANCE.get_or_init(|| std::sync::Mutex::new(HashMap::new()))
 }
 
 #[tauri::command]
 #[allow(non_snake_case)]
 fn send_agent_message(itemId: u32, message: String) {
-    println!(">>> backend received send_agent_message: itemId={}, message='{}'", itemId, message);
+    println!(
+        ">>> backend received send_agent_message: itemId={}, message='{}'",
+        itemId, message
+    );
     if let Ok(mut map) = pending_agent_messages().lock() {
         map.entry(itemId).or_default().push(message);
     }
@@ -139,7 +200,9 @@ pub struct McpServerConfig {
     pub url: String,
 }
 
-fn bool_true() -> bool { true }
+fn bool_true() -> bool {
+    true
+}
 
 #[derive(Debug, Serialize)]
 pub struct McpToolInfo {
@@ -217,10 +280,21 @@ fn emit_model_exchange(
     endpoint: &str,
     payload: Value,
 ) {
+    emit_model_exchange_for_item(app_handle, request.item_id, round, phase, endpoint, payload);
+}
+
+fn emit_model_exchange_for_item(
+    app_handle: &tauri::AppHandle,
+    item_id: u32,
+    round: usize,
+    phase: &str,
+    endpoint: &str,
+    payload: Value,
+) {
     let _ = app_handle.emit(
         "model-exchange",
         ModelExchangeEvent {
-            item_id: request.item_id,
+            item_id,
             round,
             phase: phase.to_string(),
             endpoint: endpoint.to_string(),
@@ -458,12 +532,13 @@ fn read_skill_file(id: &str, path: &Path) -> Option<(SkillMeta, String)> {
         }
     };
     // Accept both `prompt` and `system_prompt`.
-    let prompt = parsed
-        .system_prompt
-        .or(parsed.prompt)
-        .unwrap_or_default();
+    let prompt = parsed.system_prompt.or(parsed.prompt).unwrap_or_default();
     Some((
-        SkillMeta { id: id.to_string(), name, description },
+        SkillMeta {
+            id: id.to_string(),
+            name,
+            description,
+        },
         prompt,
     ))
 }
@@ -529,7 +604,10 @@ fn session_base_dir(working_directory: &str, subdir: &str) -> PathBuf {
     let home = std::env::var("USERPROFILE")
         .or_else(|_| std::env::var("HOME"))
         .unwrap_or_else(|_| ".".to_string());
-    PathBuf::from(home).join(".listagent").join("sessions").join(subdir)
+    PathBuf::from(home)
+        .join(".listagent")
+        .join("sessions")
+        .join(subdir)
 }
 
 /// Parse frontend's item code (base-36, uppercase, zero-padded to 4) back to numeric id.
@@ -801,6 +879,32 @@ fn tool_definitions(selected: &[String]) -> Result<Vec<Value>, String> {
                     }
                 }
             })),
+            "execute_command" => Ok(serde_json::json!({
+                "type": "function",
+                "function": {
+                    "name": "execute_command",
+                    "description": "Execute a local command in the Agent workspace directory and return exit code, stdout, and stderr. Pass the executable as command and each argument separately in args. This does not run through a shell unless command is explicitly a shell such as cmd, powershell, or sh.",
+                    "parameters": {
+                        "type": "object",
+                        "properties": {
+                            "command": { "type": "string", "description": "Executable to run, e.g. npm, cargo, python, git, cmd, powershell, or sh." },
+                            "args": {
+                                "type": "array",
+                                "items": { "type": "string" },
+                                "description": "Command arguments as separate strings. Defaults to []."
+                            },
+                            "timeout_seconds": {
+                                "type": "integer",
+                                "minimum": 1,
+                                "maximum": MAX_COMMAND_TIMEOUT_SECONDS,
+                                "description": "Optional timeout in seconds. Defaults to 30. For long builds such as EDK2/BaseTools, use 1800-7200."
+                            }
+                        },
+                        "required": ["command"],
+                        "additionalProperties": false
+                    }
+                }
+            })),
             _ => Err(format!("不支援的工具：{name}")),
         })
         .collect()
@@ -875,11 +979,426 @@ fn required_string<'a>(arguments: &'a Value, name: &str) -> Result<&'a str, Stri
         .ok_or_else(|| format!("缺少字串參數 {name}"))
 }
 
+fn optional_string_array(arguments: &Value, name: &str) -> Result<Vec<String>, String> {
+    match arguments.get(name) {
+        None => Ok(vec![]),
+        Some(Value::Array(items)) => items
+            .iter()
+            .map(|item| {
+                item.as_str()
+                    .map(str::to_string)
+                    .ok_or_else(|| format!("{name} 必須是字串陣列"))
+            })
+            .collect(),
+        Some(_) => Err(format!("{name} 必須是字串陣列")),
+    }
+}
+
+fn parse_json_string_array(raw: &str) -> Result<Vec<String>, String> {
+    let wrapped = format!("[{raw}]");
+    let values: Vec<Value> = serde_json::from_str(&wrapped).map_err(|e| e.to_string())?;
+    values
+        .into_iter()
+        .map(|value| {
+            value
+                .as_str()
+                .map(str::to_string)
+                .ok_or_else(|| "args must contain strings only".to_string())
+        })
+        .collect()
+}
+
+fn parse_execute_command_arguments_fallback(raw: &str) -> Option<Value> {
+    let command_marker = "\"command\"";
+    let command_marker_idx = raw.find(command_marker)?;
+    let command_colon_idx = raw[command_marker_idx + command_marker.len()..].find(':')?
+        + command_marker_idx
+        + command_marker.len();
+    let command_raw = raw[command_colon_idx + 1..].trim_start();
+    let decoder = serde_json::Deserializer::from_str(command_raw);
+    let mut stream = decoder.into_iter::<String>();
+    let command = stream.next()?.ok()?;
+
+    let args_marker = "\"args\"";
+    let args_marker_idx = raw.find(args_marker)?;
+    let args_open_rel = raw[args_marker_idx..].find('[')?;
+    let args_start = args_marker_idx + args_open_rel + 1;
+    let timeout_marker = "\"timeout_seconds\"";
+    let timeout_idx = raw.find(timeout_marker);
+    let args_end = timeout_idx
+        .and_then(|idx| raw[..idx].rfind(','))
+        .or_else(|| raw[args_start..].find(']').map(|idx| args_start + idx))?;
+    let args_raw = raw[args_start..args_end].trim().trim_end_matches(',');
+    let args = parse_json_string_array(args_raw).ok()?;
+
+    let mut out = serde_json::json!({
+        "command": command,
+        "args": args,
+    });
+    if let Some(idx) = timeout_idx {
+        let timeout_colon_idx =
+            raw[idx + timeout_marker.len()..].find(':')? + idx + timeout_marker.len();
+        let timeout_tail = raw[timeout_colon_idx + 1..].trim_start();
+        let digits: String = timeout_tail
+            .chars()
+            .take_while(|ch| ch.is_ascii_digit())
+            .collect();
+        if let Ok(timeout) = digits.parse::<u64>() {
+            out["timeout_seconds"] = serde_json::json!(timeout);
+        }
+    }
+    Some(out)
+}
+
+fn parse_tool_arguments(name: &str, raw: &str) -> Result<Value, String> {
+    match serde_json::from_str::<Value>(raw) {
+        Ok(value) => Ok(value),
+        Err(error) if name == "execute_command" => parse_execute_command_arguments_fallback(raw)
+            .ok_or_else(|| format!("工具 {name} 的參數不是有效 JSON：{error}")),
+        Err(error) => Err(format!("工具 {name} 的參數不是有效 JSON：{error}")),
+    }
+}
+
 fn relative_display(root: &Path, path: &Path) -> String {
     path.strip_prefix(root)
         .unwrap_or(path)
         .to_string_lossy()
         .replace('\\', "/")
+}
+
+fn truncate_tool_output(text: &str, max_chars: usize) -> String {
+    if text.chars().count() <= max_chars {
+        return text.to_string();
+    }
+    let truncated: String = text.chars().take(max_chars).collect();
+    format!("{truncated}\n\n…（輸出已截斷）")
+}
+
+fn perform_execute_command(root: &Path, arguments: &Value) -> Result<String, String> {
+    let command = required_string(arguments, "command")?.trim();
+    if command.is_empty() {
+        return Err("execute_command 的 command 不可為空".to_string());
+    }
+    let args = optional_string_array(arguments, "args")?;
+    let timeout_seconds = arguments
+        .get("timeout_seconds")
+        .and_then(Value::as_u64)
+        .unwrap_or(DEFAULT_COMMAND_TIMEOUT_SECONDS)
+        .clamp(1, MAX_COMMAND_TIMEOUT_SECONDS);
+    let timeout = std::time::Duration::from_secs(timeout_seconds);
+    let started = std::time::Instant::now();
+
+    let mut child = std::process::Command::new(command)
+        .args(&args)
+        .current_dir(root)
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .spawn()
+        .map_err(|error| format!("無法啟動 command：{error}"))?;
+
+    let mut timed_out = false;
+    loop {
+        match child.try_wait() {
+            Ok(Some(_)) => break,
+            Ok(None) if started.elapsed() >= timeout => {
+                timed_out = true;
+                let _ = child.kill();
+                break;
+            }
+            Ok(None) => std::thread::sleep(std::time::Duration::from_millis(50)),
+            Err(error) => return Err(format!("等待 command 失敗：{error}")),
+        }
+    }
+
+    let output = child
+        .wait_with_output()
+        .map_err(|error| format!("讀取 command 輸出失敗：{error}"))?;
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    let stderr = String::from_utf8_lossy(&output.stderr);
+    Ok(serde_json::json!({
+        "command": command,
+        "args": args,
+        "cwd": root.to_string_lossy(),
+        "success": output.status.success() && !timed_out,
+        "exit_code": output.status.code(),
+        "timed_out": timed_out,
+        "timeout_seconds": timeout_seconds,
+        "stdout": truncate_tool_output(&stdout, 12000),
+        "stderr": truncate_tool_output(&stderr, 12000)
+    })
+    .to_string())
+}
+
+async fn read_command_stream(
+    stream_name: &'static str,
+    reader: impl tokio::io::AsyncRead + Unpin,
+    tx: tokio::sync::mpsc::UnboundedSender<(&'static str, String)>,
+) {
+    let mut reader = tokio::io::BufReader::new(reader);
+    let mut buf = Vec::new();
+    loop {
+        buf.clear();
+        match reader.read_until(b'\n', &mut buf).await {
+            Ok(0) => break,
+            Ok(_) => {
+                let line = String::from_utf8_lossy(&buf)
+                    .trim_end_matches(['\r', '\n'])
+                    .to_string();
+                let _ = tx.send((stream_name, line));
+            }
+            Err(error) => {
+                let _ = tx.send((stream_name, format!("讀取輸出失敗：{error}")));
+                break;
+            }
+        }
+    }
+}
+
+fn emit_command_output_batch(
+    app_handle: &tauri::AppHandle,
+    item_id: u32,
+    round: usize,
+    endpoint: &str,
+    call_id: &str,
+    command: &str,
+    args: &[String],
+    cwd: &str,
+    lines: &[(String, String)],
+) {
+    if lines.is_empty() {
+        return;
+    }
+    let payload_lines: Vec<Value> = lines
+        .iter()
+        .map(|(stream, line)| serde_json::json!({ "stream": stream, "line": line }))
+        .collect();
+    let (stream, line) = lines
+        .last()
+        .map(|(stream, line)| (stream.as_str(), line.as_str()))
+        .unwrap_or(("stdout", ""));
+    emit_model_exchange_for_item(
+        app_handle,
+        item_id,
+        round,
+        "command_output",
+        endpoint,
+        serde_json::json!({
+            "callId": call_id,
+            "name": "execute_command",
+            "command": command,
+            "args": args,
+            "cwd": cwd,
+            "stream": stream,
+            "line": line,
+            "lines": payload_lines,
+        }),
+    );
+}
+
+fn looks_like_completion_command(command: &str, args: &[String]) -> bool {
+    let command_lower = command.to_ascii_lowercase();
+    let script = format!("{} {}", command_lower, args.join(" ").to_ascii_lowercase());
+    let command_name = Path::new(command)
+        .file_stem()
+        .and_then(|name| name.to_str())
+        .unwrap_or(command)
+        .to_ascii_lowercase();
+
+    command_name == "build"
+        || script.contains("build.bat")
+        || script.contains("\\build ")
+        || script.contains("/build ")
+        || script.contains(" nmake")
+        || script.contains(" ninja")
+        || script.contains(" msbuild")
+        || script.contains(" cargo build")
+        || script.contains(" cargo test")
+        || script.contains(" npm run build")
+        || script.contains(" npm test")
+        || script.contains(" pytest")
+        || script.contains(" ctest")
+}
+
+fn execute_command_next_step(
+    success: bool,
+    timed_out: bool,
+    command: &str,
+    args: &[String],
+) -> String {
+    if timed_out {
+        return "The command timed out. Diagnose the timeout, then either retry with a clearer command or report the blocker.".to_string();
+    }
+    if !success {
+        return "The command failed. Use the exit code, stdout, and stderr from this result to fix the issue before retrying.".to_string();
+    }
+    if looks_like_completion_command(command, args) {
+        return "This build/test command completed successfully. If this satisfies the user's request, stop calling more tools and provide the final concise result now.".to_string();
+    }
+    "The command completed successfully. If it answered the user's request, stop calling more tools and summarize the result.".to_string()
+}
+
+async fn perform_execute_command_streaming(
+    app_handle: &tauri::AppHandle,
+    request: &AgentExecutionRequest,
+    round: usize,
+    endpoint: &str,
+    root: &Path,
+    call_id: &str,
+    arguments: &Value,
+) -> Result<String, String> {
+    let command = required_string(arguments, "command")?.trim();
+    if command.is_empty() {
+        return Err("execute_command 的 command 不可為空".to_string());
+    }
+    let args = optional_string_array(arguments, "args")?;
+    let timeout_seconds = arguments
+        .get("timeout_seconds")
+        .and_then(Value::as_u64)
+        .unwrap_or(DEFAULT_COMMAND_TIMEOUT_SECONDS)
+        .clamp(1, MAX_COMMAND_TIMEOUT_SECONDS);
+    let timeout = std::time::Duration::from_secs(timeout_seconds);
+    let started = std::time::Instant::now();
+
+    let mut child = tokio::process::Command::new(command)
+        .args(&args)
+        .current_dir(root)
+        .stdin(std::process::Stdio::null())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .spawn()
+        .map_err(|error| format!("無法啟動 command：{error}"))?;
+
+    let (tx, mut rx) = tokio::sync::mpsc::unbounded_channel::<(&'static str, String)>();
+    let stdout_task = child.stdout.take().map(|stdout| {
+        let tx = tx.clone();
+        tokio::spawn(read_command_stream("stdout", stdout, tx))
+    });
+    let stderr_task = child.stderr.take().map(|stderr| {
+        let tx = tx.clone();
+        tokio::spawn(read_command_stream("stderr", stderr, tx))
+    });
+    drop(tx);
+
+    let mut stdout_text = String::new();
+    let mut stderr_text = String::new();
+    let mut timed_out = false;
+    let cwd = root.to_string_lossy().to_string();
+    let mut pending_output: Vec<(String, String)> = Vec::new();
+
+    let mut queue_line = |stream: &str, line: &str, pending: &mut Vec<(String, String)>| {
+        if stream == "stderr" {
+            stderr_text.push_str(line);
+            stderr_text.push('\n');
+        } else {
+            stdout_text.push_str(line);
+            stdout_text.push('\n');
+        }
+        pending.push((stream.to_string(), line.to_string()));
+    };
+
+    queue_line(
+        "system",
+        &format!("$ {} {}", command, args.join(" ")).trim_end(),
+        &mut pending_output,
+    );
+    emit_command_output_batch(
+        app_handle,
+        request.item_id,
+        round,
+        endpoint,
+        call_id,
+        command,
+        &args,
+        &cwd,
+        &pending_output,
+    );
+    pending_output.clear();
+    let mut last_flush = std::time::Instant::now();
+
+    let status = loop {
+        while let Ok((stream, line)) = rx.try_recv() {
+            queue_line(stream, &line, &mut pending_output);
+        }
+        if pending_output.len() >= 50
+            || last_flush.elapsed() >= std::time::Duration::from_millis(250)
+        {
+            emit_command_output_batch(
+                app_handle,
+                request.item_id,
+                round,
+                endpoint,
+                call_id,
+                command,
+                &args,
+                &cwd,
+                &pending_output,
+            );
+            pending_output.clear();
+            last_flush = std::time::Instant::now();
+        }
+        match child.try_wait() {
+            Ok(Some(exit_status)) => {
+                break Some(exit_status);
+            }
+            Ok(None) if started.elapsed() >= timeout => {
+                timed_out = true;
+                let _ = child.kill().await;
+                break child.wait().await.ok();
+            }
+            Ok(None) => {}
+            Err(error) => return Err(format!("等待 command 失敗：{error}")),
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+    };
+
+    if let Some(task) = stdout_task {
+        let _ = task.await;
+    }
+    if let Some(task) = stderr_task {
+        let _ = task.await;
+    }
+    while let Ok((stream, line)) = rx.try_recv() {
+        queue_line(stream, &line, &mut pending_output);
+    }
+
+    let success = status.map(|s| s.success()).unwrap_or(false) && !timed_out;
+    let exit_code = status.and_then(|s| s.code());
+    let final_line = if timed_out {
+        format!("Command timed out after {timeout_seconds}s")
+    } else {
+        format!(
+            "Command exited with code {}",
+            exit_code.map_or_else(|| "unknown".to_string(), |c| c.to_string())
+        )
+    };
+    queue_line("system", &final_line, &mut pending_output);
+    emit_command_output_batch(
+        app_handle,
+        request.item_id,
+        round,
+        endpoint,
+        call_id,
+        command,
+        &args,
+        &cwd,
+        &pending_output,
+    );
+    let next_step = execute_command_next_step(success, timed_out, command, &args);
+
+    Ok(serde_json::json!({
+        "command": command,
+        "args": args,
+        "cwd": cwd,
+        "success": success,
+        "exit_code": exit_code,
+        "timed_out": timed_out,
+        "timeout_seconds": timeout_seconds,
+        "next_step": next_step,
+        "stdout": truncate_tool_output(&stdout_text, 12000),
+        "stderr": truncate_tool_output(&stderr_text, 12000)
+    })
+    .to_string())
 }
 
 fn search_file_content(
@@ -1052,7 +1571,10 @@ fn execute_tool(
         }
         "trigger_event" => {
             let event_id = required_string(arguments, "event_id")?;
-            let message = arguments.get("message").and_then(Value::as_str).unwrap_or("");
+            let message = arguments
+                .get("message")
+                .and_then(Value::as_str)
+                .unwrap_or("");
             let arg1 = arguments.get("arg1").and_then(Value::as_str).unwrap_or("");
             let arg2 = arguments.get("arg2").and_then(Value::as_str).unwrap_or("");
             let arg3 = arguments.get("arg3").and_then(Value::as_str).unwrap_or("");
@@ -1069,22 +1591,32 @@ fn execute_tool(
                     arg2: String,
                     arg3: String,
                 }
-                let _ = handle.emit("agent-event-triggered", AgentEventPayload {
-                    event_id: event_id.to_string(),
-                    message: message.to_string(),
-                    arg1: arg1.to_string(),
-                    arg2: arg2.to_string(),
-                    arg3: arg3.to_string(),
-                });
+                let _ = handle.emit(
+                    "agent-event-triggered",
+                    AgentEventPayload {
+                        event_id: event_id.to_string(),
+                        message: message.to_string(),
+                        arg1: arg1.to_string(),
+                        arg2: arg2.to_string(),
+                        arg3: arg3.to_string(),
+                    },
+                );
             }
             Ok(format!("已觸發事件：事件 ID 為「{}」，訊息為「{}」，arg1為「{}」，arg2為「{}」，arg3為「{}」", event_id, message, arg1, arg2, arg3))
         }
         "get_current_time" => {
-            let tz_arg = arguments.get("timezone").and_then(Value::as_str).unwrap_or("").trim();
+            let tz_arg = arguments
+                .get("timezone")
+                .and_then(Value::as_str)
+                .unwrap_or("")
+                .trim();
             let utc_now = chrono::Utc::now();
             let (formatted, tz_label, is_default) = if tz_arg.is_empty() {
                 let system_tz_name = iana_time_zone::get_timezone().ok();
-                match system_tz_name.as_deref().and_then(|n| n.parse::<chrono_tz::Tz>().ok()) {
+                match system_tz_name
+                    .as_deref()
+                    .and_then(|n| n.parse::<chrono_tz::Tz>().ok())
+                {
                     Some(tz) => {
                         let converted = utc_now.with_timezone(&tz);
                         (
@@ -1103,9 +1635,9 @@ fn execute_tool(
                     }
                 }
             } else {
-                let tz: chrono_tz::Tz = tz_arg
-                    .parse()
-                    .map_err(|_| format!("無效的時區：{tz_arg}（請用 IANA 名稱，如 Asia/Taipei）"))?;
+                let tz: chrono_tz::Tz = tz_arg.parse().map_err(|_| {
+                    format!("無效的時區：{tz_arg}（請用 IANA 名稱，如 Asia/Taipei）")
+                })?;
                 let converted = utc_now.with_timezone(&tz);
                 (
                     converted.format("%Y-%m-%d %H:%M:%S %z").to_string(),
@@ -1119,8 +1651,10 @@ fn execute_tool(
                 "timezone": tz_label,
                 "source": if is_default { "system default" } else { "user-specified" },
                 "unix_ms": utc_now.timestamp_millis()
-            }).to_string())
+            })
+            .to_string())
         }
+        "execute_command" => perform_execute_command(root, arguments),
         _ => Err(format!("工具未啟用或不存在：{name}")),
     }
 }
@@ -1146,18 +1680,32 @@ enum McpClientState {
 impl McpClientState {
     async fn send_json_rpc(&mut self, method: &str, params: Value) -> Result<Value, String> {
         match self {
-            McpClientState::Stdio { stdin, reader, request_id, .. } => {
+            McpClientState::Stdio {
+                stdin,
+                reader,
+                request_id,
+                ..
+            } => {
                 *request_id += 1;
                 let id = *request_id;
-                let req = serde_json::json!({"jsonrpc":"2.0","id":id,"method":method,"params":params});
+                let req =
+                    serde_json::json!({"jsonrpc":"2.0","id":id,"method":method,"params":params});
                 let mut line = serde_json::to_string(&req).map_err(|e| e.to_string())?;
                 line.push('\n');
-                stdin.write_all(line.as_bytes()).await.map_err(|e| e.to_string())?;
+                stdin
+                    .write_all(line.as_bytes())
+                    .await
+                    .map_err(|e| e.to_string())?;
                 stdin.flush().await.map_err(|e| e.to_string())?;
                 loop {
                     let mut resp = String::new();
-                    reader.read_line(&mut resp).await.map_err(|e| e.to_string())?;
-                    if resp.is_empty() { return Err("MCP server 已關閉".to_string()); }
+                    reader
+                        .read_line(&mut resp)
+                        .await
+                        .map_err(|e| e.to_string())?;
+                    if resp.is_empty() {
+                        return Err("MCP server 已關閉".to_string());
+                    }
                     let v: Value = serde_json::from_str(resp.trim()).map_err(|e| e.to_string())?;
                     if v.get("id").map(|x| !x.is_null()).unwrap_or(false) {
                         if let Some(err) = v.get("error") {
@@ -1167,13 +1715,24 @@ impl McpClientState {
                     }
                 }
             }
-            McpClientState::Http { client, url, request_id } => {
+            McpClientState::Http {
+                client,
+                url,
+                request_id,
+            } => {
                 *request_id += 1;
                 let id = *request_id;
-                let req = serde_json::json!({"jsonrpc":"2.0","id":id,"method":method,"params":params});
-                let v: Value = client.post(url.as_str()).json(&req).send().await
+                let req =
+                    serde_json::json!({"jsonrpc":"2.0","id":id,"method":method,"params":params});
+                let v: Value = client
+                    .post(url.as_str())
+                    .json(&req)
+                    .send()
+                    .await
                     .map_err(|e| e.to_string())?
-                    .json().await.map_err(|e| e.to_string())?;
+                    .json()
+                    .await
+                    .map_err(|e| e.to_string())?;
                 if let Some(err) = v.get("error") {
                     return Err(format!("MCP 錯誤：{err}"));
                 }
@@ -1183,17 +1742,26 @@ impl McpClientState {
     }
 
     async fn list_tools(&mut self) -> Result<Vec<Value>, String> {
-        let result = self.send_json_rpc("tools/list", serde_json::json!({})).await?;
-        Ok(result.get("tools").and_then(Value::as_array).cloned().unwrap_or_default())
+        let result = self
+            .send_json_rpc("tools/list", serde_json::json!({}))
+            .await?;
+        Ok(result
+            .get("tools")
+            .and_then(Value::as_array)
+            .cloned()
+            .unwrap_or_default())
     }
 
     async fn call_tool(&mut self, name: &str, args: &Value) -> Result<String, String> {
-        let result = self.send_json_rpc(
-            "tools/call",
-            serde_json::json!({"name": name, "arguments": args}),
-        ).await?;
+        let result = self
+            .send_json_rpc(
+                "tools/call",
+                serde_json::json!({"name": name, "arguments": args}),
+            )
+            .await?;
         if let Some(content) = result.get("content").and_then(Value::as_array) {
-            let text = content.iter()
+            let text = content
+                .iter()
                 .filter_map(|item| {
                     if item.get("type").and_then(Value::as_str) == Some("text") {
                         item.get("text").and_then(Value::as_str).map(str::to_string)
@@ -1210,7 +1778,10 @@ impl McpClientState {
     }
 }
 
-async fn init_mcp_client(config: &McpServerConfig, working_dir: &str) -> Result<McpClientState, String> {
+async fn init_mcp_client(
+    config: &McpServerConfig,
+    working_dir: &str,
+) -> Result<McpClientState, String> {
     let mut client = match config.transport.as_str() {
         "stdio" => {
             if config.command.trim().is_empty() {
@@ -1231,10 +1802,10 @@ async fn init_mcp_client(config: &McpServerConfig, working_dir: &str) -> Result<
                 c
             };
             cmd.envs(&config.env)
-               .stdin(std::process::Stdio::piped())
-               .stdout(std::process::Stdio::piped())
-               .stderr(std::process::Stdio::null())
-               .kill_on_drop(true);
+                .stdin(std::process::Stdio::piped())
+                .stdout(std::process::Stdio::piped())
+                .stderr(std::process::Stdio::null())
+                .kill_on_drop(true);
             if !working_dir.is_empty() {
                 cmd.current_dir(working_dir);
             }
@@ -1261,16 +1832,25 @@ async fn init_mcp_client(config: &McpServerConfig, working_dir: &str) -> Result<
         t => return Err(format!("不支援的 transport：{t}")),
     };
 
-    client.send_json_rpc("initialize", serde_json::json!({
-        "protocolVersion": "2024-11-05",
-        "capabilities": {},
-        "clientInfo": {"name": "ListAgent", "version": "0.1.0"}
-    })).await?;
+    client
+        .send_json_rpc(
+            "initialize",
+            serde_json::json!({
+                "protocolVersion": "2024-11-05",
+                "capabilities": {},
+                "clientInfo": {"name": "ListAgent", "version": "0.1.0"}
+            }),
+        )
+        .await?;
 
     // notifications/initialized (required by some stdio servers)
     if let McpClientState::Stdio { stdin, .. } = &mut client {
-        let notif = "{\"jsonrpc\":\"2.0\",\"method\":\"notifications/initialized\",\"params\":{}}\n";
-        stdin.write_all(notif.as_bytes()).await.map_err(|e| e.to_string())?;
+        let notif =
+            "{\"jsonrpc\":\"2.0\",\"method\":\"notifications/initialized\",\"params\":{}}\n";
+        stdin
+            .write_all(notif.as_bytes())
+            .await
+            .map_err(|e| e.to_string())?;
         stdin.flush().await.map_err(|e| e.to_string())?;
     }
 
@@ -1278,34 +1858,49 @@ async fn init_mcp_client(config: &McpServerConfig, working_dir: &str) -> Result<
 }
 
 fn mcp_tools_to_openai(tools: &[Value]) -> Vec<Value> {
-    tools.iter().filter_map(|t| {
-        let name = t.get("name")?.as_str()?;
-        Some(serde_json::json!({
-            "type": "function",
-            "function": {
-                "name": name,
-                "description": t.get("description").and_then(Value::as_str).unwrap_or(""),
-                "parameters": t.get("inputSchema").cloned()
-                    .unwrap_or(serde_json::json!({"type":"object","properties":{}}))
-            }
-        }))
-    }).collect()
+    tools
+        .iter()
+        .filter_map(|t| {
+            let name = t.get("name")?.as_str()?;
+            Some(serde_json::json!({
+                "type": "function",
+                "function": {
+                    "name": name,
+                    "description": t.get("description").and_then(Value::as_str).unwrap_or(""),
+                    "parameters": t.get("inputSchema").cloned()
+                        .unwrap_or(serde_json::json!({"type":"object","properties":{}}))
+                }
+            }))
+        })
+        .collect()
 }
 
 #[tauri::command]
-async fn list_mcp_server_tools(server: McpServerConfig, working_directory: String) -> Result<Vec<McpToolInfo>, String> {
+async fn list_mcp_server_tools(
+    server: McpServerConfig,
+    working_directory: String,
+) -> Result<Vec<McpToolInfo>, String> {
     let mut client = init_mcp_client(&server, &working_directory).await?;
     let tools = client.list_tools().await?;
-    Ok(tools.iter().filter_map(|t| {
-        let name = t.get("name")?.as_str()?.to_string();
-        let description = t.get("description").and_then(Value::as_str).unwrap_or("").to_string();
-        Some(McpToolInfo { name, description })
-    }).collect())
+    Ok(tools
+        .iter()
+        .filter_map(|t| {
+            let name = t.get("name")?.as_str()?.to_string();
+            let description = t
+                .get("description")
+                .and_then(Value::as_str)
+                .unwrap_or("")
+                .to_string();
+            Some(McpToolInfo { name, description })
+        })
+        .collect())
 }
 
 fn load_memory_messages(working_directory: &str, item_code: &str) -> Vec<Value> {
     let dir = session_base_dir(working_directory, item_code);
-    if !dir.exists() { return vec![]; }
+    if !dir.exists() {
+        return vec![];
+    }
 
     // When workspace is set, sessions from all items pool together — filter by itemId.
     let filter_item_id = if !working_directory.trim().is_empty() {
@@ -1315,23 +1910,38 @@ fn load_memory_messages(working_directory: &str, item_code: &str) -> Vec<Value> 
     };
 
     let mut sessions: Vec<(u64, PathBuf)> = match fs::read_dir(&dir) {
-        Ok(rd) => rd.flatten().filter_map(|entry| {
-            let path = entry.path();
-            if path.extension().and_then(|e| e.to_str()) != Some("json") { return None; }
-            if !entry.file_name().to_string_lossy().starts_with("session_") { return None; }
-            if let Some(target_id) = filter_item_id {
-                match read_session_item_id(&path) {
-                    Some(id) if id == target_id => {}
-                    _ => return None,
+        Ok(rd) => rd
+            .flatten()
+            .filter_map(|entry| {
+                let path = entry.path();
+                if path.extension().and_then(|e| e.to_str()) != Some("json") {
+                    return None;
                 }
-            }
-            let modified = entry.metadata().ok()?.modified().ok()?
-                .duration_since(std::time::UNIX_EPOCH).ok()?.as_millis() as u64;
-            Some((modified, path))
-        }).collect(),
+                if !entry.file_name().to_string_lossy().starts_with("session_") {
+                    return None;
+                }
+                if let Some(target_id) = filter_item_id {
+                    match read_session_item_id(&path) {
+                        Some(id) if id == target_id => {}
+                        _ => return None,
+                    }
+                }
+                let modified = entry
+                    .metadata()
+                    .ok()?
+                    .modified()
+                    .ok()?
+                    .duration_since(std::time::UNIX_EPOCH)
+                    .ok()?
+                    .as_millis() as u64;
+                Some((modified, path))
+            })
+            .collect(),
         Err(_) => return vec![],
     };
-    if sessions.is_empty() { return vec![]; }
+    if sessions.is_empty() {
+        return vec![];
+    }
     sessions.sort_by(|a, b| b.0.cmp(&a.0));
 
     let content = match fs::read_to_string(&sessions[0].1) {
@@ -1349,27 +1959,32 @@ fn load_memory_messages(working_directory: &str, item_code: &str) -> Vec<Value> 
     };
 
     // Extract previous user input from round 1 request
-    let user_input = exchanges.iter()
+    let user_input = exchanges
+        .iter()
         .find(|ex| {
-            ex.get("phase").and_then(Value::as_str) == Some("request") &&
-            ex.get("round").and_then(Value::as_u64) == Some(1)
+            ex.get("phase").and_then(Value::as_str) == Some("request")
+                && ex.get("round").and_then(Value::as_u64) == Some(1)
         })
         .and_then(|ex| ex.pointer("/payload/messages"))
         .and_then(Value::as_array)
-        .and_then(|msgs| msgs.iter().find(|msg| {
-            msg.get("_source").and_then(Value::as_str) == Some("📨 使用者輸入")
-        }))
+        .and_then(|msgs| {
+            msgs.iter()
+                .find(|msg| msg.get("_source").and_then(Value::as_str) == Some("📨 使用者輸入"))
+        })
         .and_then(|msg| msg.get("content").and_then(Value::as_str))
         .map(str::to_string);
 
     // Extract final assistant text response (last response exchange with non-empty content)
-    let final_response = exchanges.iter().rev()
+    let final_response = exchanges
+        .iter()
+        .rev()
         .find(|ex| {
-            ex.get("phase").and_then(Value::as_str) == Some("response") &&
-            ex.pointer("/payload/body/choices/0/message/content")
-                .and_then(Value::as_str)
-                .map(|s| !s.is_empty())
-                .unwrap_or(false)
+            ex.get("phase").and_then(Value::as_str) == Some("response")
+                && ex
+                    .pointer("/payload/body/choices/0/message/content")
+                    .and_then(Value::as_str)
+                    .map(|s| !s.is_empty())
+                    .unwrap_or(false)
         })
         .and_then(|ex| ex.pointer("/payload/body/choices/0/message/content"))
         .and_then(Value::as_str)
@@ -1459,8 +2074,12 @@ fn url_decode(input: &str) -> String {
                 }
             }
             result.push('%');
-            if let Some(c1) = h1 { result.push(c1); }
-            if let Some(c2) = h2 { result.push(c2); }
+            if let Some(c1) = h1 {
+                result.push(c1);
+            }
+            if let Some(c2) = h2 {
+                result.push(c2);
+            }
         } else if c == '+' {
             result.push(' ');
         } else {
@@ -1471,13 +2090,16 @@ fn url_decode(input: &str) -> String {
 }
 
 fn percent_encode(input: &str) -> String {
-    input.bytes().map(|b| {
-        if b.is_ascii_alphanumeric() || b == b'-' || b == b'_' || b == b'.' || b == b'~' {
-            (b as char).to_string()
-        } else {
-            format!("%{:02X}", b)
-        }
-    }).collect()
+    input
+        .bytes()
+        .map(|b| {
+            if b.is_ascii_alphanumeric() || b == b'-' || b == b'_' || b == b'.' || b == b'~' {
+                (b as char).to_string()
+            } else {
+                format!("%{:02X}", b)
+            }
+        })
+        .collect()
 }
 
 async fn perform_web_search(query: &str) -> Result<String, String> {
@@ -1499,7 +2121,7 @@ async fn perform_web_search(query: &str) -> Result<String, String> {
         Ok(res) if res.status().is_success() => {
             let html = res.text().await.unwrap_or_default();
             let mut results = Vec::new();
-            
+
             let parts: Vec<&str> = html.split("class=\"result ").collect();
             for part in parts.into_iter().skip(1) {
                 let mut url = String::new();
@@ -1591,7 +2213,7 @@ async fn perform_web_search(query: &str) -> Result<String, String> {
             let titles = arr[1].as_array().ok_or("無效的維基百科標題欄位")?;
             let snippets = arr[2].as_array().ok_or("無效的維基百科描述欄位")?;
             let urls = arr[3].as_array().ok_or("無效的維基百科連結欄位")?;
-            
+
             let mut results = Vec::new();
             for i in 0..titles.len() {
                 results.push(serde_json::json!({
@@ -1606,7 +2228,6 @@ async fn perform_web_search(query: &str) -> Result<String, String> {
 
     Err("搜尋未傳回任何結果".to_string())
 }
-
 
 /// Call an OpenAI-compatible /v1/embeddings endpoint. `base_url` may already contain
 /// `/embeddings` or be a base like `https://api.openai.com/v1`; both are handled.
@@ -1632,29 +2253,41 @@ async fn get_embeddings(
     if !api_key.trim().is_empty() {
         req = req.bearer_auth(api_key.trim());
     }
-    let resp = req.send().await.map_err(|e| format!("embedding 請求失敗：{e}"))?;
+    let resp = req
+        .send()
+        .await
+        .map_err(|e| format!("embedding 請求失敗：{e}"))?;
     let status = resp.status();
-    let text = resp.text().await.map_err(|e| format!("讀取 embedding 回應失敗：{e}"))?;
+    let text = resp
+        .text()
+        .await
+        .map_err(|e| format!("讀取 embedding 回應失敗：{e}"))?;
     if !status.is_success() {
         return Err(format!("embedding API 回傳 {status}：{text}"));
     }
     let json: Value = serde_json::from_str(&text)
         .map_err(|e| format!("embedding 回應不是有效 JSON：{e}；內容：{text}"))?;
-    let data = json.get("data").and_then(Value::as_array)
+    let data = json
+        .get("data")
+        .and_then(Value::as_array)
         .ok_or_else(|| format!("embedding 回應缺少 data：{text}"))?;
     let mut out: Vec<Option<Vec<f32>>> = vec![None; inputs.len()];
     for item in data {
         let idx = item.get("index").and_then(Value::as_u64).unwrap_or(0) as usize;
-        let emb = item.get("embedding").and_then(Value::as_array)
+        let emb = item
+            .get("embedding")
+            .and_then(Value::as_array)
             .ok_or_else(|| format!("embedding item 缺少 embedding：{item}"))?;
-        let vec: Vec<f32> = emb.iter()
+        let vec: Vec<f32> = emb
+            .iter()
             .filter_map(|v| v.as_f64().map(|x| x as f32))
             .collect();
         if idx < out.len() {
             out[idx] = Some(vec);
         }
     }
-    let parsed: Vec<Vec<f32>> = out.into_iter()
+    let parsed: Vec<Vec<f32>> = out
+        .into_iter()
         .enumerate()
         .map(|(i, v)| v.ok_or_else(|| format!("embedding 缺少 index {i}")))
         .collect::<Result<Vec<Vec<f32>>, String>>()?;
@@ -1665,7 +2298,11 @@ fn cosine_similarity(a: &[f32], b: &[f32]) -> f32 {
     let dot: f32 = a.iter().zip(b.iter()).map(|(x, y)| x * y).sum();
     let na: f32 = a.iter().map(|x| x * x).sum::<f32>().sqrt();
     let nb: f32 = b.iter().map(|x| x * x).sum::<f32>().sqrt();
-    if na == 0.0 || nb == 0.0 { 0.0 } else { dot / (na * nb) }
+    if na == 0.0 || nb == 0.0 {
+        0.0
+    } else {
+        dot / (na * nb)
+    }
 }
 
 async fn perform_fetch_url(url: &str) -> Result<String, String> {
@@ -1703,15 +2340,17 @@ async fn perform_fetch_url(url: &str) -> Result<String, String> {
         .await
         .map_err(|e| format!("讀取回應失敗：{e}"))?;
 
-    let text = if content_type.contains("html") || content_type.contains("xml") || content_type.is_empty() {
-        let mut cleaned = strip_html_block(&body, "script");
-        cleaned = strip_html_block(&cleaned, "style");
-        cleaned = strip_html_block(&cleaned, "noscript");
-        let stripped = strip_html_tags_and_decode(&cleaned);
-        collapse_whitespace(&stripped)
-    } else {
-        body
-    };
+    let text =
+        if content_type.contains("html") || content_type.contains("xml") || content_type.is_empty()
+        {
+            let mut cleaned = strip_html_block(&body, "script");
+            cleaned = strip_html_block(&cleaned, "style");
+            cleaned = strip_html_block(&cleaned, "noscript");
+            let stripped = strip_html_tags_and_decode(&cleaned);
+            collapse_whitespace(&stripped)
+        } else {
+            body
+        };
 
     const MAX_LEN: usize = 8000;
     if text.chars().count() > MAX_LEN {
@@ -1734,13 +2373,19 @@ fn strip_html_block(input: &str, tag: &str) -> String {
         let after_open = start + open.len();
         let gt = match lower[after_open..].find('>') {
             Some(offset) => after_open + offset + 1,
-            None => { idx = input.len(); break; }
+            None => {
+                idx = input.len();
+                break;
+            }
         };
         match lower[gt..].find(&close) {
             Some(offset) => {
                 idx = gt + offset + close.len();
             }
-            None => { idx = input.len(); break; }
+            None => {
+                idx = input.len();
+                break;
+            }
         }
     }
     if idx < input.len() {
@@ -1811,9 +2456,13 @@ async fn execute_agent_with_tools(
         "web_search",
         "fetch_url",
         "get_current_time",
+        "execute_command",
     ];
     let catalog_builtin_defs = if request.tools_search {
-        let all_names: Vec<String> = ALL_BUILTIN_TOOL_NAMES.iter().map(|s| s.to_string()).collect();
+        let all_names: Vec<String> = ALL_BUILTIN_TOOL_NAMES
+            .iter()
+            .map(|s| s.to_string())
+            .collect();
         tool_definitions(&all_names)?
     } else {
         selected_builtin_defs.clone()
@@ -1828,18 +2477,21 @@ async fn execute_agent_with_tools(
     let mut pre_checked_mcp_tools = std::collections::HashSet::new();
     let workspace_str = workspace_root.to_str().unwrap_or("");
     for server in &request.mcp_servers {
-        if !server.enabled { continue; }
+        if !server.enabled {
+            continue;
+        }
         match init_mcp_client(server, workspace_str).await {
             Ok(mut client) => {
                 match client.list_tools().await {
                     Ok(tools) => {
                         let idx = mcp_clients.len();
                         let openai_tools_all = mcp_tools_to_openai(&tools);
-                        
+
                         // Track which MCP tools are pre-checked
                         let is_mcp_empty = request.selected_mcp_tools.is_empty();
                         for t in &openai_tools_all {
-                            if let Some(name) = t.pointer("/function/name").and_then(Value::as_str) {
+                            if let Some(name) = t.pointer("/function/name").and_then(Value::as_str)
+                            {
                                 let qualified = format!("{}::{}", server.name, name);
                                 if is_mcp_empty || request.selected_mcp_tools.contains(&qualified) {
                                     pre_checked_mcp_tools.insert(name.to_string());
@@ -1852,14 +2504,21 @@ async fn execute_agent_with_tools(
                         let openai_tools: Vec<Value> = if request.tools_search || is_mcp_empty {
                             openai_tools_all
                         } else {
-                            openai_tools_all.into_iter().filter(|t| {
-                                let name = t.pointer("/function/name").and_then(Value::as_str).unwrap_or("");
-                                let qualified = format!("{}::{}", server.name, name);
-                                request.selected_mcp_tools.contains(&qualified)
-                            }).collect()
+                            openai_tools_all
+                                .into_iter()
+                                .filter(|t| {
+                                    let name = t
+                                        .pointer("/function/name")
+                                        .and_then(Value::as_str)
+                                        .unwrap_or("");
+                                    let qualified = format!("{}::{}", server.name, name);
+                                    request.selected_mcp_tools.contains(&qualified)
+                                })
+                                .collect()
                         };
                         for t in &openai_tools {
-                            if let Some(name) = t.pointer("/function/name").and_then(Value::as_str) {
+                            if let Some(name) = t.pointer("/function/name").and_then(Value::as_str)
+                            {
                                 mcp_tool_map.insert(name.to_string(), idx);
                             }
                         }
@@ -1876,8 +2535,12 @@ async fn execute_agent_with_tools(
     // tools_search can discover from. When tools_search is on, catalog contains
     // all builtin tools (regardless of checkboxes) so the AI can find them by
     // keyword; when off, it only contains what the user explicitly selected.
-    let mut all_tool_defs: std::collections::HashMap<String, Value> = std::collections::HashMap::new();
-    for def in catalog_builtin_defs.iter().chain(mcp_tool_definitions.iter()) {
+    let mut all_tool_defs: std::collections::HashMap<String, Value> =
+        std::collections::HashMap::new();
+    for def in catalog_builtin_defs
+        .iter()
+        .chain(mcp_tool_definitions.iter())
+    {
         if let Some(name) = def.pointer("/function/name").and_then(Value::as_str) {
             all_tool_defs.insert(name.to_string(), def.clone());
         }
@@ -1889,7 +2552,11 @@ async fn execute_agent_with_tools(
     let mut unlocked_tools: std::collections::HashSet<String> = if request.tools_search {
         let mut set: std::collections::HashSet<String> = selected_builtin_defs
             .iter()
-            .filter_map(|def| def.pointer("/function/name").and_then(Value::as_str).map(String::from))
+            .filter_map(|def| {
+                def.pointer("/function/name")
+                    .and_then(Value::as_str)
+                    .map(String::from)
+            })
             .collect();
         set.extend(pre_checked_mcp_tools);
         set
@@ -1911,7 +2578,11 @@ async fn execute_agent_with_tools(
             let i_trimmed = input.trim();
             if p_trimmed.is_empty() {
                 i_trimmed.to_string()
-            } else if i_trimmed.is_empty() || i_trimmed == "{}" || i_trimmed == "null" || p_trimmed == i_trimmed {
+            } else if i_trimmed.is_empty()
+                || i_trimmed == "{}"
+                || i_trimmed == "null"
+                || p_trimmed == i_trimmed
+            {
                 p_trimmed.to_string()
             } else {
                 format!("{}\n{}", p_trimmed, i_trimmed)
@@ -1922,7 +2593,10 @@ async fn execute_agent_with_tools(
             let mut names: Vec<String> = Vec::new();
             let mut docs: Vec<String> = Vec::new();
             for (name, def) in &all_tool_defs {
-                let desc = def.pointer("/function/description").and_then(Value::as_str).unwrap_or("");
+                let desc = def
+                    .pointer("/function/description")
+                    .and_then(Value::as_str)
+                    .unwrap_or("");
                 let aliases = tool_aliases(name).join(" ");
                 docs.push(format!("{name}. {desc} {aliases}"));
                 names.push(name.clone());
@@ -1932,7 +2606,11 @@ async fn execute_agent_with_tools(
             inputs.extend(docs);
             let embed_endpoint = {
                 let base = request.embedding_api_base_url.trim().trim_end_matches('/');
-                if base.ends_with("/embeddings") { base.to_string() } else { format!("{base}/embeddings") }
+                if base.ends_with("/embeddings") {
+                    base.to_string()
+                } else {
+                    format!("{base}/embeddings")
+                }
             };
             let start_request_body = serde_json::json!({
                 "model": &request.embedding_model,
@@ -1958,7 +2636,9 @@ async fn execute_agent_with_tools(
                 &request.embedding_api_key,
                 &request.embedding_model,
                 inputs,
-            ).await {
+            )
+            .await
+            {
                 Ok((embeddings, request_body, response_body)) if embeddings.len() >= 2 => {
                     let query_emb = &embeddings[0];
                     let mut scored: Vec<(f32, String)> = names
@@ -1966,7 +2646,8 @@ async fn execute_agent_with_tools(
                         .enumerate()
                         .map(|(i, n)| (cosine_similarity(query_emb, &embeddings[i + 1]), n.clone()))
                         .collect();
-                    scored.sort_by(|a, b| b.0.partial_cmp(&a.0).unwrap_or(std::cmp::Ordering::Equal));
+                    scored
+                        .sort_by(|a, b| b.0.partial_cmp(&a.0).unwrap_or(std::cmp::Ordering::Equal));
                     const TOP_K: usize = 5;
                     // Capture full ranking BEFORE consuming into top-K so we can log it.
                     let ranking: Vec<Value> = scored
@@ -2032,8 +2713,8 @@ async fn execute_agent_with_tools(
                     );
                 }
             }
+        }
     }
-}
     let tools_search_def = serde_json::json!({
         "type": "function",
         "function": {
@@ -2056,15 +2737,67 @@ async fn execute_agent_with_tools(
     // MCP tools have no aliases (only name/description matching applies).
     fn tool_aliases(name: &str) -> &'static [&'static str] {
         match name {
-            "list_directory" => &["folder", "directory", "files", "ls", "dir", "workspace", "browse"],
-            "search_content" => &["grep", "find", "search", "text", "content", "code", "keyword"],
+            "list_directory" => &[
+                "folder",
+                "directory",
+                "files",
+                "ls",
+                "dir",
+                "workspace",
+                "browse",
+            ],
+            "search_content" => &[
+                "grep", "find", "search", "text", "content", "code", "keyword",
+            ],
             "read_file" => &["file", "read", "load", "open", "content", "text"],
             "write_file" => &["file", "write", "save", "create", "output"],
             "replace_string" => &["edit", "modify", "change", "update", "patch"],
-            "trigger_event" => &["event", "trigger", "notify", "signal", "integrate", "call", "hook"],
-            "web_search" => &["web", "internet", "google", "search", "online", "news", "weather", "stock", "info", "lookup", "research", "query"],
-            "fetch_url" => &["web", "url", "http", "https", "page", "site", "download", "get", "content", "html", "scrape", "weather", "news"],
-            "get_current_time" => &["time", "date", "now", "today", "clock", "timezone", "current", "moment", "timestamp", "day", "hour", "minute"],
+            "trigger_event" => &[
+                "event",
+                "trigger",
+                "notify",
+                "signal",
+                "integrate",
+                "call",
+                "hook",
+            ],
+            "web_search" => &[
+                "web", "internet", "google", "search", "online", "news", "weather", "stock",
+                "info", "lookup", "research", "query",
+            ],
+            "fetch_url" => &[
+                "web", "url", "http", "https", "page", "site", "download", "get", "content",
+                "html", "scrape", "weather", "news",
+            ],
+            "get_current_time" => &[
+                "time",
+                "date",
+                "now",
+                "today",
+                "clock",
+                "timezone",
+                "current",
+                "moment",
+                "timestamp",
+                "day",
+                "hour",
+                "minute",
+            ],
+            "execute_command" => &[
+                "command",
+                "terminal",
+                "shell",
+                "process",
+                "run",
+                "execute",
+                "cli",
+                "script",
+                "npm",
+                "cargo",
+                "git",
+                "powershell",
+                "cmd",
+            ],
             _ => &[],
         }
     }
@@ -2097,9 +2830,15 @@ async fn execute_agent_with_tools(
     let now_line = {
         let utc_now = chrono::Utc::now();
         let system_tz_name = iana_time_zone::get_timezone().ok();
-        let (formatted, tz_label) = match system_tz_name.as_deref().and_then(|n| n.parse::<chrono_tz::Tz>().ok()) {
+        let (formatted, tz_label) = match system_tz_name
+            .as_deref()
+            .and_then(|n| n.parse::<chrono_tz::Tz>().ok())
+        {
             Some(tz) => (
-                utc_now.with_timezone(&tz).format("%Y-%m-%d %H:%M:%S %z").to_string(),
+                utc_now
+                    .with_timezone(&tz)
+                    .format("%Y-%m-%d %H:%M:%S %z")
+                    .to_string(),
                 system_tz_name.unwrap(),
             ),
             None => {
@@ -2118,7 +2857,14 @@ async fn execute_agent_with_tools(
     );
     messages.push(serde_json::json!({
         "role": "system",
-        "content": format!("You are a tool-executing coding agent.\n{now_line}\n{workspace_line}")
+        "content": format!(
+            "You are a tool-executing coding agent.\n\
+{now_line}\n\
+{workspace_line}\n\
+When the user asks you to build, run, test, execute, fix, modify, or verify something in the workspace, you must use tools to actually perform the task. Do not stop after giving instructions or a guide unless the user explicitly asks only for instructions.\n\
+For long-running build commands, call execute_command with an explicit timeout_seconds value large enough for the build, such as 1800 to 7200 seconds.\n\
+After each tool result, follow its next_step if present. When a successful command completes the user's requested build/run/test/verification, stop calling tools and give the final result."
+        )
     }));
     messages.extend(memory_history.iter().cloned());
     messages.push(serde_json::json!({ "role": "user", "content": input }));
@@ -2192,7 +2938,9 @@ async fn execute_agent_with_tools(
             for (i, msg) in msgs.iter_mut().enumerate() {
                 let source = if has_user_prompt && i == 0 {
                     "📝 項目 Prompt".to_string()
-                } else if i >= (has_user_prompt as usize) && i < (has_user_prompt as usize) + skill_count {
+                } else if i >= (has_user_prompt as usize)
+                    && i < (has_user_prompt as usize) + skill_count
+                {
                     let skill_idx = i - (has_user_prompt as usize);
                     format!("📦 Skill：{}", skill_prompts[skill_idx].0)
                 } else if i == agent_instr_idx {
@@ -2292,7 +3040,9 @@ async fn execute_agent_with_tools(
 
         if tool_calls.is_empty() {
             let has_pending = if let Ok(map) = pending_agent_messages().lock() {
-                map.get(&request.item_id).map(|msgs| !msgs.is_empty()).unwrap_or(false)
+                map.get(&request.item_id)
+                    .map(|msgs| !msgs.is_empty())
+                    .unwrap_or(false)
             } else {
                 false
             };
@@ -2331,20 +3081,28 @@ async fn execute_agent_with_tools(
                 .pointer("/function/arguments")
                 .and_then(Value::as_str)
                 .unwrap_or("{}");
-            let arguments: Value = serde_json::from_str(raw_arguments)
-                .map_err(|error| format!("工具 {name} 的參數不是有效 JSON：{error}"))?;
+            let parsed_arguments = parse_tool_arguments(name, raw_arguments);
+            let arguments = parsed_arguments
+                .clone()
+                .unwrap_or_else(|_| serde_json::json!({}));
             // With tools_search enabled, the tools[] payload only exposes tools_search
             // itself. Any other tool call is a hallucination unless the AI first unlocked
             // the tool via tools_search.
-            let is_locked = request.tools_search
-                && name != "tools_search"
-                && !unlocked_tools.contains(name);
-            let result = if is_locked {
+            let is_locked =
+                request.tools_search && name != "tools_search" && !unlocked_tools.contains(name);
+            let result = if let Err(error) = parsed_arguments {
+                format!("Error: {error}. 請用有效 JSON 重新呼叫工具，並把 timeout_seconds 放在 args 陣列外層。")
+            } else if is_locked {
                 format!(
                     "Error: 工具 `{name}` 尚未解鎖。tools_search 模式下，必須先呼叫 tools_search 用 English keyword 搜出並解鎖工具，才能呼叫該工具。"
                 )
             } else if request.tools_search && name == "tools_search" {
-                let query = arguments.get("query").and_then(Value::as_str).unwrap_or("").trim().to_lowercase();
+                let query = arguments
+                    .get("query")
+                    .and_then(Value::as_str)
+                    .unwrap_or("")
+                    .trim()
+                    .to_lowercase();
                 if query.is_empty() {
                     // Compact index: name-only list, no descriptions, NO unlock.
                     let mut names: Vec<String> = all_tool_defs.keys().cloned().collect();
@@ -2357,10 +3115,15 @@ async fn execute_agent_with_tools(
                     let mut matches: Vec<Value> = Vec::new();
                     let mut newly_unlocked: Vec<String> = Vec::new();
                     for (tool_name, def) in &all_tool_defs {
-                        let desc = def.pointer("/function/description").and_then(Value::as_str).unwrap_or("");
+                        let desc = def
+                            .pointer("/function/description")
+                            .and_then(Value::as_str)
+                            .unwrap_or("");
                         let name_hit = tool_name.to_lowercase().contains(&query);
                         let desc_hit = desc.to_lowercase().contains(&query);
-                        let alias_hit = tool_aliases(tool_name).iter().any(|a| a.to_lowercase().contains(&query) || query.contains(&a.to_lowercase()));
+                        let alias_hit = tool_aliases(tool_name).iter().any(|a| {
+                            a.to_lowercase().contains(&query) || query.contains(&a.to_lowercase())
+                        });
                         if name_hit || desc_hit || alias_hit {
                             matches.push(serde_json::json!({
                                 "name": tool_name,
@@ -2413,13 +3176,30 @@ async fn execute_agent_with_tools(
                             Err(e) => format!("Error: {e}"),
                         }
                     }
+                } else if name == "execute_command" {
+                    match perform_execute_command_streaming(
+                        app_handle,
+                        request,
+                        round,
+                        &endpoint,
+                        &workspace_root,
+                        call_id,
+                        &arguments,
+                    )
+                    .await
+                    {
+                        Ok(s) => s,
+                        Err(e) => format!("Error: {e}"),
+                    }
                 } else {
                     execute_tool(Some(app_handle), &workspace_root, name, &arguments)
                         .unwrap_or_else(|error| format!("Error: {error}"))
                 }
             } else if let Some(&client_idx) = mcp_tool_map.get(name) {
                 if let Some((server_name, client)) = mcp_clients.get_mut(client_idx) {
-                    client.call_tool(name, &arguments).await
+                    client
+                        .call_tool(name, &arguments)
+                        .await
                         .unwrap_or_else(|e| format!("Error: MCP {server_name} / {name} 失敗：{e}"))
                 } else {
                     format!("Error: MCP client 不存在：{name}")
@@ -2496,8 +3276,8 @@ async fn execute_agent(
         || request.mcp_servers.iter().any(|s| s.enabled)
         || request.tools_search
     {
-        let res = execute_agent_with_tools(&app_handle, &request, base_url, input, has_parameters)
-            .await;
+        let res =
+            execute_agent_with_tools(&app_handle, &request, base_url, input, has_parameters).await;
         if let Ok(mut map) = pending_agent_messages().lock() {
             map.remove(&request.item_id);
         }
@@ -2523,7 +3303,11 @@ async fn execute_agent(
                 .collect::<Vec<_>>()
                 .join("\n\n");
             let existing = body["system_prompt"].as_str().unwrap_or("").to_string();
-            let merged = if existing.is_empty() { combined } else { format!("{existing}\n\n{combined}") };
+            let merged = if existing.is_empty() {
+                combined
+            } else {
+                format!("{existing}\n\n{combined}")
+            };
             body["system_prompt"] = Value::String(merged);
         }
         body
@@ -2558,7 +3342,9 @@ async fn execute_agent(
         for (i, msg) in msgs.iter_mut().enumerate() {
             let source = if has_user_prompt && i == 0 {
                 "📝 項目 Prompt".to_string()
-            } else if i >= (has_user_prompt as usize) && i < (has_user_prompt as usize) + skill_count {
+            } else if i >= (has_user_prompt as usize)
+                && i < (has_user_prompt as usize) + skill_count
+            {
                 let skill_idx = i - (has_user_prompt as usize);
                 format!("📦 Skill：{}", skill_prompts[skill_idx].0)
             } else if i == user_input_idx {
@@ -2572,8 +3358,12 @@ async fn execute_agent(
     if is_lm_studio_native {
         if has_user_prompt || !skill_prompts.is_empty() {
             let mut sources = Vec::new();
-            if has_user_prompt { sources.push("📝 項目 Prompt"); }
-            for _ in &skill_prompts { sources.push("📦 Skill"); }
+            if has_user_prompt {
+                sources.push("📝 項目 Prompt");
+            }
+            for _ in &skill_prompts {
+                sources.push("📦 Skill");
+            }
             emit_body["_system_prompt_source"] = Value::String(sources.join(" + "));
         }
         emit_body["_input_source"] = Value::String("📨 使用者輸入".to_string());
@@ -2629,7 +3419,8 @@ async fn execute_agent(
     let json: Value = serde_json::from_str(&response_body)
         .map_err(|error| format!("模型回應不是有效 JSON：{error}；內容：{response_body}"))?;
     let content = if is_lm_studio_native {
-        let raw = json.get("output")
+        let raw = json
+            .get("output")
             .and_then(Value::as_array)
             .map(|outputs| {
                 outputs
@@ -2642,7 +3433,8 @@ async fn execute_agent(
             .unwrap_or_default();
         clean_assistant_content(&raw)
     } else {
-        let raw = json.pointer("/choices/0/message/content")
+        let raw = json
+            .pointer("/choices/0/message/content")
             .and_then(Value::as_str)
             .unwrap_or_default()
             .to_string();
@@ -2722,10 +3514,22 @@ fn parse_get_input(request_path: &str) -> Result<HttpInput, String> {
         let value = decode_query_component(raw_value)?;
 
         match key.as_str() {
-            "agent"    => { agent = value; continue; }
-            "agent_id" | "agentId" => { agent_id = value; continue; }
-            "action"   => { action = value; continue; }
-            "exec_id" | "execId" => { exec_id = value; continue; }
+            "agent" => {
+                agent = value;
+                continue;
+            }
+            "agent_id" | "agentId" => {
+                agent_id = value;
+                continue;
+            }
+            "action" => {
+                action = value;
+                continue;
+            }
+            "exec_id" | "execId" => {
+                exec_id = value;
+                continue;
+            }
             _ => {}
         }
 
@@ -2751,8 +3555,8 @@ fn parse_get_input(request_path: &str) -> Result<HttpInput, String> {
 }
 
 fn parse_post_input(body: &[u8]) -> Result<HttpInput, String> {
-    let value: Value = serde_json::from_slice(body)
-        .map_err(|_| "body 必須是有效的 JSON".to_string())?;
+    let value: Value =
+        serde_json::from_slice(body).map_err(|_| "body 必須是有效的 JSON".to_string())?;
     let mut object = value
         .as_object()
         .cloned()
@@ -2780,7 +3584,13 @@ fn parse_post_input(body: &[u8]) -> Result<HttpInput, String> {
         .or_else(|| object.remove("params"))
         .or_else(|| object.remove("input"))
         .unwrap_or(Value::Object(object));
-    Ok(HttpInput { agent, agent_id, action, exec_id, parameters })
+    Ok(HttpInput {
+        agent,
+        agent_id,
+        action,
+        exec_id,
+        parameters,
+    })
 }
 
 fn handle_http_connection(
@@ -2857,12 +3667,22 @@ fn handle_http_connection(
         let mut req_path = String::new();
         for pair in query.split('&').filter(|p| !p.is_empty()) {
             let (raw_key, raw_value) = pair.split_once('=').unwrap_or((pair, ""));
-            if let (Ok(key), Ok(value)) = (decode_query_component(raw_key), decode_query_component(raw_value)) {
-                if key == "path" { req_path = value; break; }
+            if let (Ok(key), Ok(value)) = (
+                decode_query_component(raw_key),
+                decode_query_component(raw_value),
+            ) {
+                if key == "path" {
+                    req_path = value;
+                    break;
+                }
             }
         }
         if req_path.is_empty() {
-            write_http_response(&mut stream, "400 Bad Request", r#"{"error":"缺少 path 參數"}"#);
+            write_http_response(
+                &mut stream,
+                "400 Bad Request",
+                r#"{"error":"缺少 path 參數"}"#,
+            );
             return;
         }
         // 安全：只允許讀取 .json 且路徑包含 ".ListAgent/session" 或 ".listagent/sessions"
@@ -2872,7 +3692,11 @@ fn handle_http_connection(
                 || req_path.contains(".listagent/sessions")
                 || req_path.contains(".listagent\\sessions"));
         if !looks_like_session {
-            write_http_response(&mut stream, "403 Forbidden", r#"{"error":"僅允許讀取 session 目錄下的 .json 檔"}"#);
+            write_http_response(
+                &mut stream,
+                "403 Forbidden",
+                r#"{"error":"僅允許讀取 session 目錄下的 .json 檔"}"#,
+            );
             return;
         }
         match fs::read_to_string(&req_path) {
@@ -2910,7 +3734,8 @@ fn handle_http_connection(
                 match fs::write(&path, &body) {
                     Ok(_) => write_http_response(&mut stream, "200 OK", r#"{"ok":true}"#),
                     Err(error) => {
-                        let response = serde_json::json!({ "error": error.to_string() }).to_string();
+                        let response =
+                            serde_json::json!({ "error": error.to_string() }).to_string();
                         write_http_response(&mut stream, "500 Internal Server Error", &response);
                     }
                 }
@@ -2926,7 +3751,9 @@ fn handle_http_connection(
     // Check if HTTP trigger is enabled in settings
     if let Ok(settings) = read_settings() {
         if !settings.enable_http_input {
-            let response = serde_json::json!({ "error": "HTTP trigger is disabled in event settings" }).to_string();
+            let response =
+                serde_json::json!({ "error": "HTTP trigger is disabled in event settings" })
+                    .to_string();
             write_http_response(&mut stream, "403 Forbidden", &response);
             return;
         }
@@ -2963,13 +3790,21 @@ fn handle_http_connection(
     input.agent_id = input.agent_id.trim().to_string();
     let action = {
         let a = input.action.trim();
-        if a.is_empty() { "run".to_string() } else { a.to_string() }
+        if a.is_empty() {
+            "run".to_string()
+        } else {
+            a.to_string()
+        }
     };
 
     // Resolve agent name from agent_id if provided (via settings lookup)
     if !input.agent_id.is_empty() && input.agent.is_empty() {
         if let Ok(settings) = read_settings() {
-            if let Some(item) = settings.items.iter().find(|it| it.agent_id == input.agent_id) {
+            if let Some(item) = settings
+                .items
+                .iter()
+                .find(|it| it.agent_id == input.agent_id)
+            {
                 input.agent = item.name.clone();
             }
         }
@@ -2978,14 +3813,21 @@ fn handle_http_connection(
     // action=list_agents: 回傳 App 裡所有 items 的 { agentId, name }
     if action == "list_agents" {
         let items: Vec<ListItem> = read_settings().map(|s| s.items).unwrap_or_default();
-        let list: Vec<Value> = items.iter().map(|it| {
-            serde_json::json!({
-                "agentId": it.agent_id,
-                "name": it.name,
-                "allowHttp": it.allow_http,
+        let list: Vec<Value> = items
+            .iter()
+            .map(|it| {
+                serde_json::json!({
+                    "agentId": it.agent_id,
+                    "name": it.name,
+                    "allowHttp": it.allow_http,
+                })
             })
-        }).collect();
-        write_http_response(&mut stream, "200 OK", &serde_json::json!({ "agents": list }).to_string());
+            .collect();
+        write_http_response(
+            &mut stream,
+            "200 OK",
+            &serde_json::json!({ "agents": list }).to_string(),
+        );
         return;
     }
 
@@ -3018,7 +3860,8 @@ fn handle_http_connection(
     if action != "run" {
         let response = serde_json::json!({
             "error": format!("未知的 action：{action}（支援：run, get_status, list_agents）")
-        }).to_string();
+        })
+        .to_string();
         write_http_response(&mut stream, "400 Bad Request", &response);
         return;
     }
@@ -3052,7 +3895,8 @@ fn handle_http_connection(
         "agent": input.agent,
         "agentId": input.agent_id,
         "action": action
-    }).to_string();
+    })
+    .to_string();
     write_http_response(&mut stream, "202 Accepted", &response);
 }
 
@@ -3199,7 +4043,12 @@ mod tests {
                 }),
             )?;
             assert_eq!(
-                execute_tool(None, &root, "read_file", &serde_json::json!({ "path": file }))?,
+                execute_tool(
+                    None,
+                    &root,
+                    "read_file",
+                    &serde_json::json!({ "path": file })
+                )?,
                 "goodbye tool"
             );
             let listing = execute_tool(
@@ -3214,6 +4063,61 @@ mod tests {
 
         fs::remove_dir_all(directory).unwrap();
         result.unwrap();
+    }
+
+    #[test]
+    fn execute_command_runs_in_workspace_and_returns_output() {
+        let root = std::env::current_dir().unwrap().canonicalize().unwrap();
+        let current_exe = std::env::current_exe().unwrap();
+        let output = execute_tool(
+            None,
+            &root,
+            "execute_command",
+            &serde_json::json!({
+                "command": current_exe.to_string_lossy(),
+                "args": [
+                    "--ignored",
+                    "--exact",
+                    "tests::execute_command_helper_prints_marker",
+                    "--nocapture"
+                ],
+                "timeout_seconds": 30
+            }),
+        )
+        .unwrap();
+        let json: Value = serde_json::from_str(&output).unwrap();
+        assert_eq!(json["success"], true);
+        assert_eq!(json["timed_out"], false);
+        assert!(json["stdout"]
+            .as_str()
+            .unwrap()
+            .contains("LISTAGENT_EXECUTE_COMMAND_OK"));
+    }
+
+    #[test]
+    fn execute_command_arguments_recover_timeout_outside_args() {
+        let raw = r#"{"command": "cmd", "args": ["/c","dir /s /b \"C:\\Program Files\\Microsoft Visual Studio\\18\\Community\\VC\\Tools\\MSVC\\*\\bin\\Hostx64\\x64\\nmake.exe\" 2>nul","timeout_seconds":15]}"#;
+        let parsed = parse_tool_arguments("execute_command", raw).unwrap();
+        assert_eq!(parsed["command"], "cmd");
+        assert_eq!(parsed["timeout_seconds"], 15);
+        assert_eq!(parsed["args"].as_array().unwrap().len(), 2);
+        assert_eq!(parsed["args"][0], "/c");
+        assert!(parsed["args"][1].as_str().unwrap().contains("nmake.exe"));
+    }
+
+    #[test]
+    fn execute_command_timeout_schema_allows_long_builds() {
+        let defs = tool_definitions(&["execute_command".to_string()]).unwrap();
+        assert_eq!(
+            defs[0]["function"]["parameters"]["properties"]["timeout_seconds"]["maximum"],
+            MAX_COMMAND_TIMEOUT_SECONDS
+        );
+    }
+
+    #[test]
+    #[ignore]
+    fn execute_command_helper_prints_marker() {
+        println!("LISTAGENT_EXECUTE_COMMAND_OK");
     }
 }
 

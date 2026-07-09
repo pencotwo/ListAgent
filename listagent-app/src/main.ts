@@ -85,9 +85,9 @@ interface EventMapping {
   agentId: number
 }
 
-type ToolName = 'list_directory' | 'search_content' | 'read_file' | 'write_file' | 'replace_string' | 'trigger_event' | 'web_search' | 'fetch_url' | 'get_current_time'
+type ToolName = 'list_directory' | 'search_content' | 'read_file' | 'write_file' | 'replace_string' | 'trigger_event' | 'web_search' | 'fetch_url' | 'get_current_time' | 'execute_command'
 
-const TOOL_NAMES: ToolName[] = ['list_directory', 'search_content', 'read_file', 'write_file', 'replace_string', 'trigger_event', 'web_search', 'fetch_url', 'get_current_time']
+const TOOL_NAMES: ToolName[] = ['list_directory', 'search_content', 'read_file', 'write_file', 'replace_string', 'trigger_event', 'web_search', 'fetch_url', 'get_current_time', 'execute_command']
 
 interface AgentExecutionResult {
   endpoint: string
@@ -98,14 +98,14 @@ interface AgentExecutionResult {
 interface ModelExchangeEvent {
   itemId: number
   round: number
-  phase: 'request' | 'response' | 'tool' | 'error' | 'vector_search' | 'user_input'
+  phase: 'request' | 'response' | 'tool' | 'error' | 'vector_search' | 'user_input' | 'command_output'
   endpoint: string
   payload: unknown
 }
 
 interface SessionExchange {
   round: number
-  phase: 'request' | 'response' | 'tool' | 'error' | 'vector_search' | 'user_input'
+  phase: 'request' | 'response' | 'tool' | 'error' | 'vector_search' | 'user_input' | 'command_output'
   endpoint: string
   payload: unknown
   timestamp: number
@@ -119,6 +119,7 @@ interface SessionData {
   itemName: string
   modelName: string
   apiBaseUrl: string
+  logs?: LogEntry[]
   exchanges: SessionExchange[]
 }
 
@@ -279,6 +280,15 @@ const currentSessionExchanges: Map<number, SessionExchange[]> = new Map()
 /** 每個 item 目前 session 的開始時間 */
 const currentSessionStartedAt: Map<number, number> = new Map()
 
+/** 每個 item 目前 session 的固定 id / filename / saved path */
+const currentSessionIds: Map<number, string> = new Map()
+const currentSessionFilenames: Map<number, string> = new Map()
+const currentSessionSavedPaths: Map<number, string> = new Map()
+
+/** 節流寫入目前 session，避免 command output 大量 flush 壓垮 UI / IO */
+const currentSessionFlushTimers: Map<number, number> = new Map()
+const currentSessionWriteChains: Map<number, Promise<void>> = new Map()
+
 /** 右側面板目前正在查看的歷史 session（null = 即時執行過程） */
 let viewingSessionData: SessionData | null = null
 
@@ -400,6 +410,21 @@ function resolvePromptArguments(prompt: string, parameters: unknown): string {
 function recordModelExchange(exchange: ModelExchangeEvent): void {
   if (!itemLogs.has(exchange.itemId)) itemLogs.set(exchange.itemId, [])
   const logs = itemLogs.get(exchange.itemId)!
+  const now = Date.now()
+
+  // command_output is high-frequency streaming data. Keep one live black box in
+  // the UI, but still append every output event to session exchanges below.
+  if (exchange.phase === 'command_output') {
+    const entry = upsertCommandOutputLog(logs, exchange.payload, now)
+    appendSessionExchange(exchange, now)
+    if (selectedItemId === exchange.itemId && viewingSessionData === null) {
+      if (!updateLiveCommandOutputBox(entry)) {
+        renderMessageBox(exchange.itemId)
+      }
+    }
+    return
+  }
+
   const payload = JSON.stringify(exchange.payload, null, 2)
   const phaseLabels = {
     request: '→ 發送給 AI Model',
@@ -408,6 +433,7 @@ function recordModelExchange(exchange: ModelExchangeEvent): void {
     error: '✖ AI Model 錯誤',
     vector_search: '🔍 向量搜尋 tools',
     user_input: '💬 使用者插話',
+    command_output: '🖥 Command 輸出',
   } as const
   const levels: Record<ModelExchangeEvent['phase'], LogLevel> = {
     request: 'info',
@@ -416,8 +442,8 @@ function recordModelExchange(exchange: ModelExchangeEvent): void {
     error: 'error',
     vector_search: 'system',
     user_input: 'info',
+    command_output: 'system',
   }
-  const now = Date.now()
   logs.push({
     level: levels[exchange.phase],
     message: `[AI Round ${exchange.round}] ${phaseLabels[exchange.phase]}\nEndpoint：${exchange.endpoint}\n${payload}`,
@@ -442,6 +468,14 @@ function recordModelExchange(exchange: ModelExchangeEvent): void {
   }
 
   // 同步紀錄到 session exchanges
+  appendSessionExchange(exchange, now)
+
+  if (selectedItemId === exchange.itemId && viewingSessionData === null) {
+    renderMessageBox(exchange.itemId)
+  }
+}
+
+function appendSessionExchange(exchange: ModelExchangeEvent, timestamp: number): void {
   if (!currentSessionExchanges.has(exchange.itemId)) {
     currentSessionExchanges.set(exchange.itemId, [])
   }
@@ -450,11 +484,11 @@ function recordModelExchange(exchange: ModelExchangeEvent): void {
     phase: exchange.phase,
     endpoint: exchange.endpoint,
     payload: exchange.payload,
-    timestamp: now,
+    timestamp,
   })
-
-  if (selectedItemId === exchange.itemId && viewingSessionData === null) {
-    renderMessageBox(exchange.itemId)
+  const item = items.find((candidate) => candidate.id === exchange.itemId)
+  if (item) {
+    scheduleLiveSessionFlush(item, exchange.phase === 'command_output' ? 1000 : 100)
   }
 }
 
@@ -469,6 +503,9 @@ interface LogEntry {
   kind?: 'detail' | 'simple'
   /** 若提供，簡化模式渲染時用此 HTML 取代 escapeHtml(message)。內容必須已安全處理。 */
   html?: string
+  commandOutputKey?: string
+  commandOutputLines?: string[]
+  commandOutputTitle?: string
 }
 
 // ============================================================
@@ -569,6 +606,7 @@ const selectPreset = document.getElementById('select-preset') as HTMLSelectEleme
 const btnSavePreset = document.getElementById('btn-save-preset') as HTMLButtonElement
 const btnSave = document.getElementById('btn-save') as HTMLButtonElement
 const btnCancel = document.getElementById('btn-cancel') as HTMLButtonElement
+const btnDelete = document.getElementById('btn-delete') as HTMLButtonElement
 
 // 全域設定視窗元素
 const globalSettingsOverlay = document.getElementById('global-settings-overlay') as HTMLElement
@@ -1060,6 +1098,7 @@ async function runItem(id: number, parameters?: unknown, execId?: string): Promi
   currentSessionExchanges.set(id, [])
   const logs = itemLogs.get(id)!
   currentSessionStartedAt.set(id, Date.now())
+  startLiveSession(item)
 
   // 若此 item 正在查看歷史 session，自動切回即時模式
   if (selectedItemId === id && viewingSessionData !== null) {
@@ -1142,6 +1181,7 @@ async function runItem(id: number, parameters?: unknown, execId?: string): Promi
       timestamp: now + 7,
     })
   }
+  scheduleLiveSessionFlush(item, 100)
 
   // 若目前選取的是此 item 且在即時模式，立即更新訊息框
   if (selectedItemId === id && viewingSessionData === null) {
@@ -1298,8 +1338,8 @@ function updateCardRunButton(id: number, running: boolean): void {
 }
 
 /** 渲染訊息框內容（即時執行過程） */
-function renderMessageBox(itemId: number): void {
-  const item = items.find((i) => i.id === itemId)
+function renderMessageBox(itemId: number | null): void {
+  const item = itemId !== null ? items.find((i) => i.id === itemId) : null
   if (!item) {
     msgContent.innerHTML = '<span class="message-placeholder">← 點擊任一項目以查看執行過程</span>'
     msgItemName.textContent = ''
@@ -1310,7 +1350,7 @@ function renderMessageBox(itemId: number): void {
   msgPanelTitle.textContent = '📋 執行過程'
   msgItemName.textContent = item.name
 
-  const logs = itemLogs.get(itemId)
+  const logs = itemLogs.get(item.id)
   if (!logs || logs.length === 0) {
     msgContent.innerHTML = '<span class="message-placeholder">尚無執行記錄</span>'
     return
@@ -1368,6 +1408,89 @@ const SIMPLE_TRUNCATE_LIMIT = 600
 function truncateForSimple(text: string): string {
   if (text.length <= SIMPLE_TRUNCATE_LIMIT) return text
   return text.slice(0, SIMPLE_TRUNCATE_LIMIT) + `\n…（已截斷，共 ${text.length} 字）`
+}
+
+function commandOutputKey(payload: unknown): string {
+  const p = payload as Record<string, unknown>
+  return String(p.callId || `${p.command || 'command'}:${JSON.stringify(p.args || [])}`)
+}
+
+function commandOutputTitle(payload: unknown): string {
+  const p = payload as Record<string, unknown>
+  const command = String(p.command || 'command')
+  const args = Array.isArray(p.args) ? p.args.map(String) : []
+  const cwd = String(p.cwd || '')
+  return `${command}${args.length ? ' ' + args.join(' ') : ''}${cwd ? `  (${cwd})` : ''}`
+}
+
+function renderCommandOutputHtml(key: string, title: string, lines: string[]): string {
+  const domKey = escapeHtml(commandOutputDomKey(key))
+  return (
+    `<div class="command-output-box" data-command-output-key="${domKey}">` +
+    `<div class="command-output-title">${escapeHtml(title)}</div>` +
+    `<div class="command-output-body">${renderCommandOutputBodyHtml(lines)}</div>` +
+    `</div>`
+  )
+}
+
+function renderCommandOutputBodyHtml(lines: string[]): string {
+  const visible = lines.slice(-10)
+  const body = visible.length > 0
+    ? visible.map((line) => `<div>${escapeHtml(line)}</div>`).join('')
+    : '<div class="command-output-muted">（尚無輸出）</div>'
+  const omitted = lines.length > 10
+    ? `<div class="command-output-muted">… 只顯示最新 10 行（已省略 ${lines.length - 10} 行）</div>`
+    : ''
+  return omitted + body
+}
+
+function commandOutputDomKey(key: string): string {
+  return `cmd-${Array.from(key).map((ch) => ch.charCodeAt(0).toString(16)).join('-')}`
+}
+
+function upsertCommandOutputLog(logs: LogEntry[], payload: unknown, timestamp: number): LogEntry {
+  const p = payload as Record<string, unknown>
+  const key = commandOutputKey(payload)
+  const payloadLines = Array.isArray(p.lines)
+    ? p.lines.map((item) => {
+        const lineItem = item as Record<string, unknown>
+        return {
+          stream: String(lineItem.stream || 'stdout'),
+          line: String(lineItem.line ?? ''),
+        }
+      })
+    : [{ stream: String(p.stream || 'stdout'), line: String(p.line ?? '') }]
+  let entry = logs.find((candidate) => candidate.commandOutputKey === key)
+  if (!entry) {
+    entry = {
+      level: 'system',
+      message: '',
+      timestamp,
+      commandOutputKey: key,
+      commandOutputLines: [],
+      commandOutputTitle: commandOutputTitle(payload),
+    }
+    logs.push(entry)
+  }
+  payloadLines.forEach(({ stream, line }) => {
+    const prefix = stream === 'system' ? '' : `[${stream}] `
+    entry!.commandOutputLines!.push(`${prefix}${line}`)
+  })
+  entry.timestamp = timestamp
+  entry.message = `${entry.commandOutputTitle}\n${entry.commandOutputLines!.join('\n')}`
+  entry.html = renderCommandOutputHtml(entry.commandOutputKey!, entry.commandOutputTitle!, entry.commandOutputLines!)
+  return entry
+}
+
+function updateLiveCommandOutputBox(entry: LogEntry): boolean {
+  if (!entry.commandOutputKey || !entry.commandOutputLines) return false
+  const key = commandOutputDomKey(entry.commandOutputKey)
+  const box = msgContent.querySelector<HTMLElement>(`.command-output-box[data-command-output-key="${key}"]`)
+  const body = box?.querySelector<HTMLElement>('.command-output-body')
+  if (!box || !body) return false
+  body.innerHTML = renderCommandOutputBodyHtml(entry.commandOutputLines)
+  msgContent.scrollTop = msgContent.scrollHeight
+  return true
 }
 
 interface UsageSummary {
@@ -1691,6 +1814,26 @@ function renderInline(text: string): string {
   return s
 }
 
+function extractReasoningText(message: Record<string, unknown> | undefined): string {
+  const reasoning = message?.reasoning_content ?? message?.reasoning
+  if (typeof reasoning === 'string') return reasoning.trim()
+  if (Array.isArray(reasoning)) {
+    return reasoning
+      .map((part) => {
+        if (typeof part === 'string') return part
+        if (part && typeof part === 'object') {
+          const p = part as Record<string, unknown>
+          return String(p.text ?? p.content ?? '')
+        }
+        return ''
+      })
+      .filter(Boolean)
+      .join('\n')
+      .trim()
+  }
+  return ''
+}
+
 /** 從 exchange 產生簡化模式的可讀摘要 LogEntry（request 相不需要，回傳 null） */
 function makeSimpleExchangeEntry(
   phase: string,
@@ -1705,18 +1848,30 @@ function makeSimpleExchangeEntry(
       const choices = (body.choices as unknown[]) ?? []
       const msg = (choices[0] as Record<string, unknown> | undefined)?.message as Record<string, unknown> | undefined
       const content = (msg?.content as string | null | undefined) ?? ''
+      const reasoning = extractReasoningText(msg)
       const toolCalls = msg?.tool_calls as unknown[] | undefined
+      const reasoningText = reasoning ? `🧠 AI 決策理由：\n${reasoning}\n\n` : ''
+      const reasoningHtml = reasoning ? `🧠 AI 決策理由：${renderMarkdownSafe(reasoning)}<br><br>` : ''
       let text: string
       if (toolCalls && toolCalls.length > 0) {
         const names = toolCalls
           .map((tc) => ((tc as Record<string, unknown>)?.function as Record<string, unknown> | undefined)?.name ?? '?')
           .join(', ')
-        text = `🤖 AI 決定呼叫工具：${names}`
-        return { level: 'success', message: text, timestamp, kind: 'simple' }
-      } else if (content.trim()) {
-        text = `🤖 AI 回覆：\n${content}`
-        const html = `🤖 AI 回覆：${renderMarkdownSafe(content)}`
+        text = `${reasoningText}🤖 AI 決定呼叫工具：${names}`
+        const html = `${reasoningHtml}🤖 AI 決定呼叫工具：${escapeHtml(names)}`
         return { level: 'success', message: text, html, timestamp, kind: 'simple' }
+      } else if (content.trim()) {
+        text = `${reasoningText}🤖 AI 回覆：\n${content}`
+        const html = `${reasoningHtml}🤖 AI 回覆：${renderMarkdownSafe(content)}`
+        return { level: 'success', message: text, html, timestamp, kind: 'simple' }
+      } else if (reasoning) {
+        return {
+          level: 'success',
+          message: `🧠 AI 決策理由：\n${reasoning}`,
+          html: `🧠 AI 決策理由：${renderMarkdownSafe(reasoning)}`,
+          timestamp,
+          kind: 'simple',
+        }
       } else {
         return null
       }
@@ -1798,58 +1953,117 @@ function formatSessionTimestamp(date: Date): string {
   return `${date.getFullYear()}${pad2(date.getMonth() + 1)}${pad2(date.getDate())}_${pad2(date.getHours())}${pad2(date.getMinutes())}${pad2(date.getSeconds())}_${pad3(date.getMilliseconds())}`
 }
 
-/** 儲存本次執行的 session 到檔案 */
-async function saveCurrentSession(item: ListItem): Promise<string | null> {
-  if (!isTauri()) return null
-  const logs = itemLogs.get(item.id) ?? []
-  const exchanges = currentSessionExchanges.get(item.id)
-  if (!exchanges || exchanges.length === 0) {
-    logs.push({
-      level: 'warn',
-      message: `⚠ 本次無 AI Model 交換內容，未產生 session 檔（工作目錄：${item.workingDirectory || '（未設定，將寫入 ~/.listagent/sessions）'}）`,
-      timestamp: Date.now(),
-    })
-    if (selectedItemId === item.id && viewingSessionData === null) renderMessageBox(item.id)
-    return null
-  }
-
-  const startedAt = currentSessionStartedAt.get(item.id) ?? Date.now()
-  const endedAt = Date.now()
-  const now = new Date(endedAt)
-  const sessionId = `session_${formatSessionTimestamp(now)}`
-  const savedPath = item.workingDirectory
+function sessionSavedPath(item: ListItem, sessionId: string): string {
+  return item.workingDirectory
     ? `${item.workingDirectory}\\.ListAgent\\session\\${sessionId}.json`
     : `~/.listagent/sessions/${item.code}/${sessionId}.json`
+}
 
+function ensureLiveSessionMeta(item: ListItem): { sessionId: string, filename: string, savedPath: string } {
+  let sessionId = currentSessionIds.get(item.id)
+  if (!sessionId) {
+    const startedAt = currentSessionStartedAt.get(item.id) ?? Date.now()
+    sessionId = `session_${formatSessionTimestamp(new Date(startedAt))}`
+    currentSessionIds.set(item.id, sessionId)
+    currentSessionFilenames.set(item.id, `${sessionId}.json`)
+    currentSessionSavedPaths.set(item.id, sessionSavedPath(item, sessionId))
+  }
+  return {
+    sessionId,
+    filename: currentSessionFilenames.get(item.id) ?? `${sessionId}.json`,
+    savedPath: currentSessionSavedPaths.get(item.id) ?? sessionSavedPath(item, sessionId),
+  }
+}
+
+function buildSessionSnapshot(item: ListItem, endedAt?: number): SessionData {
+  const { sessionId } = ensureLiveSessionMeta(item)
+  const startedAt = currentSessionStartedAt.get(item.id) ?? Date.now()
   const session: SessionData = {
     sessionId,
     startedAt,
-    endedAt,
     itemId: item.id,
     itemName: item.name,
     modelName: item.modelName,
     apiBaseUrl: item.apiBaseUrl,
-    exchanges,
+    logs: itemLogs.get(item.id) ?? [],
+    exchanges: currentSessionExchanges.get(item.id) ?? [],
   }
+  if (endedAt !== undefined) session.endedAt = endedAt
+  return session
+}
 
-  try {
+function startLiveSession(item: ListItem): void {
+  const oldTimer = currentSessionFlushTimers.get(item.id)
+  if (oldTimer !== undefined) window.clearTimeout(oldTimer)
+  currentSessionFlushTimers.delete(item.id)
+  currentSessionIds.delete(item.id)
+  currentSessionFilenames.delete(item.id)
+  currentSessionSavedPaths.delete(item.id)
+  ensureLiveSessionMeta(item)
+  void flushLiveSessionNow(item)
+}
+
+function scheduleLiveSessionFlush(item: ListItem, delayMs: number): void {
+  if (!isTauri()) return
+  if (!currentSessionIds.has(item.id)) ensureLiveSessionMeta(item)
+  if (currentSessionFlushTimers.has(item.id)) return
+  const timer = window.setTimeout(() => {
+    currentSessionFlushTimers.delete(item.id)
+    void flushLiveSessionNow(item)
+  }, delayMs)
+  currentSessionFlushTimers.set(item.id, timer)
+}
+
+async function flushLiveSessionNow(item: ListItem, endedAt?: number): Promise<string | null> {
+  if (!isTauri()) return null
+  const timer = currentSessionFlushTimers.get(item.id)
+  if (timer !== undefined) {
+    window.clearTimeout(timer)
+    currentSessionFlushTimers.delete(item.id)
+  }
+  const meta = ensureLiveSessionMeta(item)
+  const session = buildSessionSnapshot(item, endedAt)
+  const previous = currentSessionWriteChains.get(item.id) ?? Promise.resolve()
+  const write = previous.catch(() => undefined).then(async () => {
     await invoke('save_session', {
       workingDirectory: item.workingDirectory,
       subdir: item.code,
-      filename: `${sessionId}.json`,
+      filename: meta.filename,
       content: JSON.stringify(session, null, 2),
     })
+  })
+  currentSessionWriteChains.set(item.id, write)
+  try {
+    await write
+    return meta.savedPath
+  } catch (error) {
+    console.error('即時儲存 session 失敗', error)
+    return null
+  }
+}
+
+/** 儲存本次執行的 session 到檔案 */
+async function saveCurrentSession(item: ListItem): Promise<string | null> {
+  if (!isTauri()) return null
+  const logs = itemLogs.get(item.id) ?? []
+  const endedAt = Date.now()
+  const meta = ensureLiveSessionMeta(item)
+
+  try {
+    const savedPath = await flushLiveSessionNow(item, endedAt)
+    if (!savedPath) throw new Error('即時 session 寫入失敗')
     logs.push({
       level: 'info',
-      message: `💾 Session 已儲存：${savedPath}`,
+      message: `💾 Session 已儲存：${meta.savedPath}`,
       timestamp: Date.now(),
     })
+    await flushLiveSessionNow(item, endedAt)
 
     // 若目前選取的是此 item，刷新歷史清單
     if (selectedItemId === item.id) {
       await loadAndRenderSessions(item)
     }
-    return savedPath
+    return meta.savedPath
   } catch (error) {
     console.error('儲存 session 失敗', error)
     logs.push({
@@ -1961,6 +2175,7 @@ function renderSessionViewInPanel(session: SessionData): void {
     error: '✖ AI Model 錯誤',
     vector_search: '🔍 向量搜尋 tools',
     user_input: '💬 使用者插話',
+    command_output: '🖥 Command 輸出',
   }
   const levelMap: Record<string, string> = {
     request: 'info',
@@ -1969,21 +2184,30 @@ function renderSessionViewInPanel(session: SessionData): void {
     error: 'error',
     vector_search: 'system',
     user_input: 'info',
+    command_output: 'system',
   }
 
-  const logs: LogEntry[] = session.exchanges.flatMap((ex) => {
-    const label = phaseLabels[ex.phase] ?? ex.phase
-    const level = (levelMap[ex.phase] ?? 'info') as LogLevel
-    const payload = JSON.stringify(ex.payload, null, 2)
-    const detailEntry: LogEntry = {
-      level,
-      message: `[AI Round ${ex.round}] ${label}\nEndpoint：${ex.endpoint}\n${payload}`,
-      timestamp: ex.timestamp,
-      kind: 'detail',
-    }
-    const simpleEntry = makeSimpleExchangeEntry(ex.phase, ex.round, ex.payload, ex.timestamp)
-    return simpleEntry ? [detailEntry, simpleEntry] : [detailEntry]
-  })
+  const logs: LogEntry[] = session.logs ?? []
+  if (logs.length === 0) {
+    session.exchanges.forEach((ex) => {
+      if (ex.phase === 'command_output') {
+        upsertCommandOutputLog(logs, ex.payload, ex.timestamp)
+        return
+      }
+      const label = phaseLabels[ex.phase] ?? ex.phase
+      const level = (levelMap[ex.phase] ?? 'info') as LogLevel
+      const payload = JSON.stringify(ex.payload, null, 2)
+      const detailEntry: LogEntry = {
+        level,
+        message: `[AI Round ${ex.round}] ${label}\nEndpoint：${ex.endpoint}\n${payload}`,
+        timestamp: ex.timestamp,
+        kind: 'detail',
+      }
+      const simpleEntry = makeSimpleExchangeEntry(ex.phase, ex.round, ex.payload, ex.timestamp)
+      logs.push(detailEntry)
+      if (simpleEntry) logs.push(simpleEntry)
+    })
+  }
 
   msgContent.innerHTML = logsToHtml(logs)
   msgContent.scrollTop = 0
@@ -2988,6 +3212,61 @@ function closeGlobalSettings(): void {
   globalSettingsOverlay.classList.add('hidden')
 }
 
+/** 刪除 Agent */
+async function deleteSettings(): Promise<void> {
+  if (editingItemId === null) return
+
+  // 1. 若該 Agent 正在執行，提示無法刪除
+  if (runningItems.has(editingItemId)) {
+    window.alert('此 Agent 正在執行中，請先停止或等待執行結束後再刪除。')
+    return
+  }
+
+  // 2. 顯示確認對話框
+  const item = items.find((i) => i.id === editingItemId)
+  if (!item) return
+
+  const confirmed = window.confirm(`確定要刪除 Agent「${item.name}」嗎？此動作無法復原。`)
+  if (!confirmed) return
+  const typedName = window.prompt(`請再次確認：輸入 Agent 名稱「${item.name}」才能刪除。`)
+  if (typedName !== item.name) {
+    window.alert('Agent 名稱不一致，已取消刪除。')
+    return
+  }
+
+  // 3. 從 items 陣列中移除
+  items = items.filter((i) => i.id !== editingItemId)
+
+  // 4. 清除與此 Agent 相關的事件和對應
+  scheduledEvents = scheduledEvents.filter((event) => event.agentId !== editingItemId)
+  eventMappings = eventMappings.filter((mapping) => mapping.agentId !== editingItemId)
+
+  // 5. 記憶體/變數狀態清理
+  itemLogs.delete(editingItemId)
+  currentSessionExchanges.delete(editingItemId)
+  currentSessionStartedAt.delete(editingItemId)
+  itemTaskQueues.delete(editingItemId)
+  lastTaskByAgent.delete(item.name)
+
+  // 6. 若被刪除的正是目前選取的 Agent，將其設為選取 null
+  if (selectedItemId === editingItemId) {
+    selectedItemId = null
+    viewingSessionData = null
+    viewingSessionPath = null
+    renderMessageBox(null)
+    sessionListEl.innerHTML = '<span class="session-placeholder">請選取項目以查看 Session</span>'
+  }
+
+  // 7. 儲存設定並更新 UI
+  await saveItems()
+  await saveScheduledEvents()
+  await saveEventMappings()
+  closeSettingsDialog()
+  renderList()
+  renderScheduledEvents()
+  updateInputBoxState()
+}
+
 /** 儲存設定 */
 async function saveSettings(): Promise<void> {
   if (editingItemId === null) return
@@ -3087,6 +3366,8 @@ function sendMessageToAgent(): void {
       payload: { content: val },
       timestamp: now,
     })
+    const item = items.find((candidate) => candidate.id === selectedItemId)
+    if (item) scheduleLiveSessionFlush(item, 100)
     renderMessageBox(selectedItemId)
   } else {
     void runItem(selectedItemId, val)
@@ -3285,6 +3566,7 @@ document.getElementById('btn-add-mcp')!.addEventListener('click', () => {
 
 /** 儲存 */
 btnSave.addEventListener('click', saveSettings)
+btnDelete.addEventListener('click', deleteSettings)
 
 /** 使用原生目錄選擇器設定工作目錄 */
 btnSelectWorkingDirectory.addEventListener('click', async () => {
