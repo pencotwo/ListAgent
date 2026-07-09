@@ -2899,22 +2899,22 @@ async fn execute_agent_with_tools(
                 )
             }
         };
-        format!("Current date/time: {formatted} ({tz_label}). Use this instead of guessing from training data.")
+        format!("Now: {formatted} ({tz_label}).")
     };
     let workspace_line = format!(
-        "Workspace root: {}. All file tools operate under this directory — use workspace-relative paths (or absolute paths under this root). Do NOT invent unrelated absolute paths.",
+        "Workspace: {}. Use relative paths or absolute paths under it only.",
         workspace_root.display()
     );
     messages.push(serde_json::json!({
         "role": "system",
         "content": format!(
-            "You are a tool-executing coding agent.\n\
+            "You are a tool-using coding agent.\n\
 {now_line}\n\
 {workspace_line}\n\
-When the user asks you to build, run, test, execute, fix, modify, or verify something in the workspace, you must use tools to actually perform the task. Do not stop after giving instructions or a guide unless the user explicitly asks only for instructions.\n\
-If the user asks you to execute a known command or script name such as build.bat, run it directly with execute_command from the workspace root. Do not use search_content to find script filenames; search_content searches inside files and can be expensive on large trees.\n\
-For long-running build commands, call execute_command with an explicit timeout_seconds value large enough for the build, such as 1800 to 7200 seconds.\n\
-After each tool result, follow its next_step if present. When a successful command completes the user's requested build/run/test/verification, stop calling tools and give the final result."
+For build/run/test/execute/fix/verify requests, actually use tools unless the user asks only for instructions.\n\
+Known scripts/commands such as build.bat: run directly with execute_command from workspace root; do not use search_content to find filenames.\n\
+For long builds, set timeout_seconds 1800-7200.\n\
+Follow tool next_step. When the requested task succeeds, stop calling tools and give the final result."
         )
     }));
     messages.extend(memory_history.iter().cloned());
