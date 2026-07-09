@@ -1242,7 +1242,8 @@ body.theme-glass-neon #list-container.card-layout .item-card.selected {
   line-height: 1.5;
 }
 
-.memory-group {
+.memory-group,
+.rounds-group {
   min-width: 0;
   margin: 0;
   padding: 12px;
@@ -1251,7 +1252,8 @@ body.theme-glass-neon #list-container.card-layout .item-card.selected {
   background: var(--bg-surface);
 }
 
-.memory-group legend {
+.memory-group legend,
+.rounds-group legend {
   padding: 0 8px;
   color: var(--text-secondary);
   font-size: 13px;
@@ -1263,6 +1265,12 @@ body.theme-glass-neon #list-container.card-layout .item-card.selected {
 .memory-toggle-content {
   display: flex;
   align-items: center;
+}
+
+.rounds-content {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
 }
 
 .mcp-tool-section {
@@ -2300,6 +2308,7 @@ body.theme-glass-neon .form-select,
 body.theme-glass-neon .model-group,
 body.theme-glass-neon .tool-group,
 body.theme-glass-neon .memory-group,
+body.theme-glass-neon .rounds-group,
 body.theme-glass-neon .skill-group,
 body.theme-glass-neon .event-group,
 body.theme-glass-neon .mcp-group {
@@ -2406,6 +2415,7 @@ body.theme-cherry-blossom .form-select,
 body.theme-cherry-blossom .model-group,
 body.theme-cherry-blossom .tool-group,
 body.theme-cherry-blossom .memory-group,
+body.theme-cherry-blossom .rounds-group,
 body.theme-cherry-blossom .skill-group,
 body.theme-cherry-blossom .event-group,
 body.theme-cherry-blossom .mcp-group {
@@ -2513,6 +2523,7 @@ body.theme-cyberpunk-amber .form-select,
 body.theme-cyberpunk-amber .model-group,
 body.theme-cyberpunk-amber .tool-group,
 body.theme-cyberpunk-amber .memory-group,
+body.theme-cyberpunk-amber .rounds-group,
 body.theme-cyberpunk-amber .skill-group,
 body.theme-cyberpunk-amber .event-group,
 body.theme-cyberpunk-amber .mcp-group {
@@ -2609,6 +2620,7 @@ body.theme-midnight-forest .form-select,
 body.theme-midnight-forest .model-group,
 body.theme-midnight-forest .tool-group,
 body.theme-midnight-forest .memory-group,
+body.theme-midnight-forest .rounds-group,
 body.theme-midnight-forest .skill-group,
 body.theme-midnight-forest .event-group,
 body.theme-midnight-forest .mcp-group {
@@ -2704,6 +2716,7 @@ body.theme-ocean-breeze .form-select,
 body.theme-ocean-breeze .model-group,
 body.theme-ocean-breeze .tool-group,
 body.theme-ocean-breeze .memory-group,
+body.theme-ocean-breeze .rounds-group,
 body.theme-ocean-breeze .skill-group,
 body.theme-ocean-breeze .event-group,
 body.theme-ocean-breeze .mcp-group {
@@ -2801,6 +2814,7 @@ body.theme-solarized-light .form-select,
 body.theme-solarized-light .model-group,
 body.theme-solarized-light .tool-group,
 body.theme-solarized-light .memory-group,
+body.theme-solarized-light .rounds-group,
 body.theme-solarized-light .skill-group,
 body.theme-solarized-light .event-group,
 body.theme-solarized-light .mcp-group {
@@ -2898,6 +2912,7 @@ body.theme-nordic-slate .form-select,
 body.theme-nordic-slate .model-group,
 body.theme-nordic-slate .tool-group,
 body.theme-nordic-slate .memory-group,
+body.theme-nordic-slate .rounds-group,
 body.theme-nordic-slate .skill-group,
 body.theme-nordic-slate .event-group,
 body.theme-nordic-slate .mcp-group {
@@ -2984,6 +2999,7 @@ body.theme-sunset-blvd .form-select,
 body.theme-sunset-blvd .model-group,
 body.theme-sunset-blvd .tool-group,
 body.theme-sunset-blvd .memory-group,
+body.theme-sunset-blvd .rounds-group,
 body.theme-sunset-blvd .skill-group,
 body.theme-sunset-blvd .event-group,
 body.theme-sunset-blvd .mcp-group {
@@ -3088,6 +3104,7 @@ body.theme-royal-velvet .form-select,
 body.theme-royal-velvet .model-group,
 body.theme-royal-velvet .tool-group,
 body.theme-royal-velvet .memory-group,
+body.theme-royal-velvet .rounds-group,
 body.theme-royal-velvet .skill-group,
 body.theme-royal-velvet .event-group,
 body.theme-royal-velvet .mcp-group {
@@ -3187,6 +3204,7 @@ body.theme-minimalist-ink .form-select,
 body.theme-minimalist-ink .model-group,
 body.theme-minimalist-ink .tool-group,
 body.theme-minimalist-ink .memory-group,
+body.theme-minimalist-ink .rounds-group,
 body.theme-minimalist-ink .skill-group,
 body.theme-minimalist-ink .event-group,
 body.theme-minimalist-ink .mcp-group {
@@ -3289,6 +3307,7 @@ body.theme-vaporwave .form-select,
 body.theme-vaporwave .model-group,
 body.theme-vaporwave .tool-group,
 body.theme-vaporwave .memory-group,
+body.theme-vaporwave .rounds-group,
 body.theme-vaporwave .skill-group,
 body.theme-vaporwave .event-group,
 body.theme-vaporwave .mcp-group {

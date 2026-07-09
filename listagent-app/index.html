@@ -166,6 +166,15 @@
             </div>
           </fieldset>
 
+          <fieldset class="rounds-group">
+            <legend>輪數上限</legend>
+            <div class="rounds-content">
+              <label class="form-label" for="input-max-rounds">最大對話輪數（含 tool-call 來回）</label>
+              <input type="number" id="input-max-rounds" class="form-input" min="1" step="1" placeholder="100" />
+              <p class="tool-hint">超過此輪數後會自動終止執行。預設 100。</p>
+            </div>
+          </fieldset>
+
           <fieldset class="skill-group">
             <legend>SKILLS</legend>
             <div id="skill-list" class="skill-list">

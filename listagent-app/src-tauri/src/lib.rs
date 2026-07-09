@@ -14,6 +14,7 @@ const HTTP_SERVER_ADDRESS: &str = "127.0.0.1:37123";
 const MAX_REQUEST_BODY_SIZE: usize = 1024 * 1024;
 const MAX_QUEUED_INPUTS: usize = 1000;
 const MAX_TOOL_ITERATIONS: usize = 30;
+fn default_max_rounds() -> u32 { 100 }
 const MAX_TOOL_FILE_SIZE: u64 = 1024 * 1024;
 const MAX_SEARCH_RESULTS: usize = 200;
 
@@ -177,6 +178,9 @@ struct AgentExecutionRequest {
     embedding_api_key: String,
     #[serde(default, rename = "embeddingModel")]
     embedding_model: String,
+    #[serde(default = "default_max_rounds")]
+    #[serde(rename = "maxRounds")]
+    max_rounds: u32,
 }
 
 #[derive(Debug, Serialize)]
@@ -268,6 +272,9 @@ pub struct ListItem {
     #[serde(default)]
     #[serde(rename = "embeddingModel")]
     pub embedding_model: String,
+    #[serde(default = "default_max_rounds")]
+    #[serde(rename = "maxRounds")]
+    pub max_rounds: u32,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -2126,8 +2133,9 @@ async fn execute_agent_with_tools(
     // Some thinking/reasoning models (e.g. DeepSeek) don't support tool_choice="required".
     // Start with "required" and fall back to "auto" if the API rejects it.
     let mut tool_choice_required = true;
+    let max_iterations = request.max_rounds as usize;
     let mut round_index = 0usize;
-    while round_index < MAX_TOOL_ITERATIONS {
+    while round_index < max_iterations {
         let round = round_index + 1;
         let tool_choice = if execution_logs.is_empty() && tool_choice_required && round == 1 {
             "required"
@@ -2445,7 +2453,7 @@ async fn execute_agent_with_tools(
         round_index += 1;
     }
 
-    Err(format!("工具呼叫超過 {MAX_TOOL_ITERATIONS} 輪，已停止執行"))
+    Err(format!("工具呼叫超過 {max_iterations} 輪，已停止執行"))
 }
 
 #[tauri::command]

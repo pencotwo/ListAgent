@@ -60,6 +60,7 @@ interface ListItem {
   embeddingApiBaseUrl: string
   embeddingApiKey: string
   embeddingModel: string
+  maxRounds: number
 }
 
 type PersistedListItem = Omit<ListItem, 'code'>
@@ -204,6 +205,7 @@ function hydrateItems(storedItems: PersistedListItem[]): ListItem[] {
     embeddingApiBaseUrl: typeof item.embeddingApiBaseUrl === 'string' ? item.embeddingApiBaseUrl : '',
     embeddingApiKey: typeof item.embeddingApiKey === 'string' ? item.embeddingApiKey : '',
     embeddingModel: typeof item.embeddingModel === 'string' ? item.embeddingModel : '',
+    maxRounds: typeof item.maxRounds === 'number' && item.maxRounds > 0 ? item.maxRounds : 100,
   }))
 }
 
@@ -227,6 +229,7 @@ function getPersistedItems(): PersistedListItem[] {
     embeddingApiBaseUrl: item.embeddingApiBaseUrl,
     embeddingApiKey: item.embeddingApiKey,
     embeddingModel: item.embeddingModel,
+    maxRounds: item.maxRounds,
   }))
 }
 
@@ -469,6 +472,63 @@ interface LogEntry {
 }
 
 // ============================================================
+// 表格框線樣式
+// ============================================================
+
+/** 表格框線樣式設定 */
+interface TableBorderStyle {
+  /** 框線粗細 (px)，預設 1 */
+  borderWidth?: number
+  /** 框線顏色 (CSS color)，預設 rgba(255,255,255,0.15) */
+  borderColor?: string
+  /** 框線樣式，預設 solid */
+  borderStyle?: 'solid' | 'dashed' | 'dotted' | 'double'
+  /** 表頭框線粗細 (px)，若不指定則沿用 borderWidth */
+  headerBorderWidth?: number
+  /** 表頭框線顏色，若不指定則沿用 borderColor */
+  headerBorderColor?: string
+  /** 儲存格內邊距 (CSS padding 值)，預設 4px 10px */
+  cellPadding?: string
+  /** 僅繪製外框線（不含內部格線），預設 false */
+  outerBorderOnly?: boolean
+  /** 完全隱藏框線，預設 false（優先於 outerBorderOnly） */
+  noBorder?: boolean
+  /** 是否啟用合併儲存格（支援 > 與 ^^ 語法），預設 false */
+  mergeCells?: boolean
+}
+
+/** 全域預設表格框線樣式，所有未指定 borderStyle 的 renderMarkdownSafe 呼叫皆會套用 */
+let defaultTableBorderStyle: TableBorderStyle = {}
+
+/** 設定全域預設表格框線樣式 */
+function setDefaultTableBorderStyle(style: TableBorderStyle): void {
+  defaultTableBorderStyle = style
+}
+
+/** 取得目前的全域預設表格框線樣式 */
+function getDefaultTableBorderStyle(): TableBorderStyle {
+  return { ...defaultTableBorderStyle }
+}
+
+// 將公開 API 函式標記為已使用（供外部程式碼呼叫）
+void setDefaultTableBorderStyle
+void getDefaultTableBorderStyle
+
+/** 將 TableBorderStyle 轉為 HTML style 屬性字串（CSS 自訂屬性） */
+function borderStyleToStyleAttr(bs: TableBorderStyle): string {
+  const parts: string[] = []
+  if (bs.borderWidth !== undefined) parts.push(`--md-border-width:${bs.borderWidth}px`)
+  if (bs.borderColor !== undefined) parts.push(`--md-border-color:${bs.borderColor}`)
+  if (bs.borderStyle !== undefined) parts.push(`--md-border-style:${bs.borderStyle}`)
+  if (bs.headerBorderWidth !== undefined) parts.push(`--md-header-border-width:${bs.headerBorderWidth}px`)
+  if (bs.headerBorderColor !== undefined) parts.push(`--md-header-border-color:${bs.headerBorderColor}`)
+  if (bs.cellPadding !== undefined) parts.push(`--md-cell-padding:${bs.cellPadding}`)
+  if (bs.outerBorderOnly !== undefined) parts.push(`--md-outer-only:${bs.outerBorderOnly ? '1' : '0'}`)
+  if (bs.noBorder !== undefined) parts.push(`--md-no-border:${bs.noBorder ? '1' : '0'}`)
+  return parts.length > 0 ? ` style="${parts.join(';')}"` : ''
+}
+
+// ============================================================
 // DOM 元素參照
 // ============================================================
 
@@ -500,6 +560,7 @@ const btnSelectWorkingDirectory = document.getElementById('btn-select-working-di
 const toolCheckboxes = Array.from(document.querySelectorAll<HTMLInputElement>('input[name="agent-tool"]'))
 const inputMemory = document.getElementById('input-memory') as HTMLInputElement
 const inputToolsSearch = document.getElementById('input-tools-search') as HTMLInputElement
+const inputMaxRounds = document.getElementById('input-max-rounds') as HTMLInputElement
 const inputEmbeddingBaseUrl = document.getElementById('input-global-embedding-base-url') as HTMLInputElement
 const inputEmbeddingApiKey = document.getElementById('input-global-embedding-api-key') as HTMLInputElement
 const inputEmbeddingModel = document.getElementById('input-global-embedding-model') as HTMLInputElement
@@ -1403,7 +1464,7 @@ function logsToHtml(logs: LogEntry[]): string {
 }
 
 /** 輕量 markdown → HTML：處理標題、粗體、分隔線、表格。用於 AI 回覆的簡化模式渲染。 */
-function renderMarkdownSafe(input: string): string {
+function renderMarkdownSafe(input: string, borderStyle?: TableBorderStyle): string {
   const lines = input.split('\n')
   const out: string[] = []
   let i = 0
@@ -1418,9 +1479,24 @@ function renderMarkdownSafe(input: string): string {
         rows.push(splitTableRow(lines[i]))
         i++
       }
-      out.push('<table class="md-table">')
-      out.push('<thead><tr>' + header.map((c) => `<th>${renderInline(c)}</th>`).join('') + '</tr></thead>')
-      out.push('<tbody>' + rows.map((r) => '<tr>' + r.map((c) => `<td>${renderInline(c)}</td>`).join('') + '</tr>').join('') + '</tbody>')
+      const bs = borderStyle ?? defaultTableBorderStyle
+      const styleAttr = borderStyleToStyleAttr(bs)
+      const mergeEnabled = bs.mergeCells === true
+      out.push(`<table class="md-table"${styleAttr}>`)
+      // 表頭也處理合併（僅 colspan，表頭不支援 ^^ rowspan）
+      const headerCells = mergeEnabled ? processRowColspan(header) : header.map((c) => ({ text: c, colspan: 1, rowspan: 1 }))
+      out.push('<thead><tr>' + headerCells.map((c) => {
+        const spanAttr = buildSpanAttr(c.colspan, c.rowspan)
+        return `<th${spanAttr}>${renderInline(c.text)}</th>`
+      }).join('') + '</tr></thead>')
+      // 處理資料列
+      const mergedRows = mergeEnabled ? processTableRows(rows, headerCells) : rows.map((r) => r.map((c) => ({ text: c, colspan: 1, rowspan: 1 })))
+      out.push('<tbody>' + mergedRows.map((row) => {
+        return '<tr>' + row.map((c) => {
+          const spanAttr = buildSpanAttr(c.colspan, c.rowspan)
+          return `<td${spanAttr}>${renderInline(c.text)}</td>`
+        }).join('') + '</tr>'
+      }).join('') + '</tbody>')
       out.push('</table>')
       continue
     }
@@ -1448,6 +1524,162 @@ function renderMarkdownSafe(input: string): string {
 function splitTableRow(line: string): string[] {
   const trimmed = line.trim().replace(/^\|/, '').replace(/\|$/, '')
   return trimmed.split('|').map((c) => c.trim())
+}
+
+// ============================================================
+// 表格合併儲存格（框線與合併功能）
+// ============================================================
+
+/** 儲存格跨度資訊 */
+interface TableCellSpan {
+  text: string
+  colspan: number
+  rowspan: number
+}
+
+/** 產生 colspan / rowspan 屬性字串 */
+function buildSpanAttr(colspan: number, rowspan: number): string {
+  const parts: string[] = []
+  if (colspan > 1) parts.push(`colspan="${colspan}"`)
+  if (rowspan > 1) parts.push(`rowspan="${rowspan}"`)
+  return parts.length > 0 ? ' ' + parts.join(' ') : ''
+}
+
+/**
+ * 合併標記語法（僅在 mergeCells=true 時啟用）：
+ * - 「>」 整格內容 = 向右合併至左方格（colspan +1）
+ * - 「^^」 整格內容 = 向上合併至上方格（rowspan +1）
+ * - 「>^^」或「^^>」 = 同時向右與向上合併
+ * - 可連續多個 > 來合併多欄。
+ * 注意：合併標記必須是「整格唯一內容」，不能與文字混合。
+ */
+
+/** 處理單列的 colspan 合併（向右合併 >） */
+function processRowColspan(cells: string[]): TableCellSpan[] {
+  const result: TableCellSpan[] = []
+  for (const raw of cells) {
+    if (isMergeMarker(raw)) {
+      // 純合併標記：加到前一格的 colspan
+      if (result.length > 0 && isRightMerge(raw)) {
+        result[result.length - 1].colspan++
+      } else {
+        // ^^ 或 ^^>（只有向上合併、沒有向右）— 仍要佔一個欄位位置
+        result.push({ text: '', colspan: 1, rowspan: 1 })
+      }
+      continue
+    }
+    result.push({ text: raw.trim(), colspan: 1, rowspan: 1 })
+  }
+  return result
+}
+
+/** 判斷整格是否為純合併標記 */
+function isMergeMarker(cell: string): boolean {
+  const t = cell.trim()
+  return t === '>' || t === '^^' || t === '>^^' || t === '^^>'
+}
+
+/** 合併標記是否包含向右合併（>） */
+function isRightMerge(cell: string): boolean {
+  const t = cell.trim()
+  return t === '>' || t === '>^^' || t === '^^>'
+}
+
+/** 合併標記是否包含向上合併（^^） */
+function isUpMerge(cell: string): boolean {
+  const t = cell.trim()
+  return t === '^^' || t === '>^^' || t === '^^>'
+}
+
+/** 處理所有資料列的 colspan / rowspan */
+function processTableRows(rows: string[][], headerCells: TableCellSpan[]): TableCellSpan[][] {
+  // 計算總欄數（從表頭的 colspan 得出）
+  const totalCols = headerCells.reduce((sum, c) => sum + c.colspan, 0)
+
+  // rowspanState[col] = 尚需跳過的剩餘 rowspan 層數
+  const rowspanState: number[] = new Array(totalCols).fill(0)
+
+  const result: TableCellSpan[][] = []
+
+  for (const row of rows) {
+    const outRow: TableCellSpan[] = []
+    let colIdx = 0 // 實際欄位索引（考慮 rowspan）
+    let cellIdx = 0 // 原始輸入格索引
+
+    while (colIdx < totalCols && cellIdx < row.length) {
+      // 跳過被上方 rowspan 佔用的欄位
+      if (rowspanState[colIdx] > 0) {
+        rowspanState[colIdx]--
+        colIdx++
+        continue
+      }
+
+      const raw = row[cellIdx]
+      cellIdx++
+
+      // 純合併標記：整格被合併
+      if (isMergeMarker(raw)) {
+        const right = isRightMerge(raw)
+        const up = isUpMerge(raw)
+
+        // 向上合併：遞增上方對應格的 rowspan，此格不輸出
+        if (up && result.length > 0) {
+          const aboveCell = findCellAtCol(result[result.length - 1], colIdx)
+          if (aboveCell) {
+            aboveCell.rowspan++
+          }
+        }
+        // 向右合併：遞增左方格的 colspan
+        if (right && outRow.length > 0) {
+          outRow[outRow.length - 1].colspan++
+          colIdx++ // 此欄已被合併，佔用一個 col 位置
+        }
+        // 只有向上沒有向右：仍需佔一個欄位（已被上方 rowspan 覆蓋的概念）
+        // 實際上不會到這裡，因為若只有 ^^，colIdx 位置的 rowspanState 會 > 0
+        continue
+      }
+
+      // 一般內容格
+      const cell: TableCellSpan = { text: raw.trim(), colspan: 1, rowspan: 1 }
+      outRow.push(cell)
+      colIdx++
+    }
+
+    result.push(outRow)
+
+    // 從 outRow 推算新的 rowspanState（供下一列使用）
+    updateRowspanState(rowspanState, outRow, totalCols)
+  }
+
+  return result
+}
+
+/** 找出列中位於指定 col 索引的儲存格 */
+function findCellAtCol(row: TableCellSpan[], targetCol: number): TableCellSpan | null {
+  let c = 0
+  for (const cell of row) {
+    if (c === targetCol) return cell
+    c += cell.colspan
+  }
+  return null
+}
+
+/** 根據本列輸出更新 rowspanState */
+function updateRowspanState(state: number[], row: TableCellSpan[], totalCols: number): void {
+  // 注意：colIdx 已在 processTableRows 的 while 迴圈中對被跳過的欄位做了遞減
+  // 此處只標記本列中 rowspan > 1 的格所影響的欄位（供下一列使用）
+  let colIdx = 0
+  for (const cell of row) {
+    if (cell.rowspan > 1) {
+      // 下一列開始要跳過此欄 (j=1)，再下一列 (j=2)，...
+      for (let j = 1; j < cell.rowspan; j++) {
+        if (colIdx < totalCols) {
+          state[colIdx] = Math.max(state[colIdx], j)
+        }
+      }
+    }
+    colIdx += cell.colspan
+  }
 }
 
 /** inline 元素：粗體 **x**、斜體 *x*、行內程式碼 `x`。輸入會做 HTML escape。 */
@@ -2656,6 +2888,7 @@ async function openSettingsDialog(itemId: number): Promise<void> {
   })
   inputMemory.checked = item.memory
   inputToolsSearch.checked = item.toolsSearch
+  inputMaxRounds.value = String(item.maxRounds)
 
   settingsOverlay.classList.remove('hidden')
 
@@ -2810,6 +3043,8 @@ async function saveSettings(): Promise<void> {
     })
     item.memory = inputMemory.checked
     item.toolsSearch = inputToolsSearch.checked
+    const rounds = parseInt(inputMaxRounds.value, 10)
+    item.maxRounds = Number.isFinite(rounds) && rounds > 0 ? rounds : 100
   }
 
   // 將 API 設定同步回下拉選單選擇的 AI 模型群組
@@ -2891,6 +3126,7 @@ btnAdd.addEventListener('click', async () => {
     embeddingApiBaseUrl: '',
     embeddingApiKey: '',
     embeddingModel: '',
+    maxRounds: 100,
   }
   items.push(newItem)
   await saveItems()
