@@ -161,7 +161,38 @@ fn resolve_env_key(var_name: &str) -> String {
     if trimmed.is_empty() {
         return String::new();
     }
-    std::env::var(trimmed).unwrap_or_default()
+    if let Ok(value) = std::env::var(trimmed) {
+        return value;
+    }
+    #[cfg(windows)]
+    {
+        for key in [
+            r"HKCU\Environment",
+            r"HKLM\SYSTEM\CurrentControlSet\Control\Session Manager\Environment",
+        ] {
+            if let Ok(output) = std::process::Command::new("reg")
+                .args(["query", key, "/v", trimmed])
+                .output()
+            {
+                if output.status.success() {
+                    let stdout = String::from_utf8_lossy(&output.stdout);
+                    for line in stdout.lines() {
+                        let mut parts = line.split_whitespace();
+                        if parts.next() == Some(trimmed) {
+                            let value_type = parts.next().unwrap_or_default();
+                            if value_type == "REG_SZ" || value_type == "REG_EXPAND_SZ" {
+                                let value = parts.collect::<Vec<_>>().join(" ");
+                                if !value.is_empty() {
+                                    return value;
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+    String::new()
 }
 
 #[tauri::command]
