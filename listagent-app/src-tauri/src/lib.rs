@@ -663,12 +663,13 @@ fn save_session(
     working_directory: String,
     subdir: String,
     filename: String,
-    content: String,
+    content: Value,
 ) -> Result<(), String> {
     let dir = session_base_dir(&working_directory, &subdir);
     fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
     let path = dir.join(&filename);
-    fs::write(&path, content.as_bytes()).map_err(|e| e.to_string())
+    let content = serde_json::to_vec_pretty(&content).map_err(|e| e.to_string())?;
+    fs::write(&path, content).map_err(|e| e.to_string())
 }
 
 #[tauri::command]
@@ -3997,11 +3998,13 @@ fn start_http_server(queue: HttpInputQueue, app_handle: tauri::AppHandle) {
         let listener = match TcpListener::bind(HTTP_SERVER_ADDRESS) {
             Ok(listener) => listener,
             Err(error) => {
+                eprintln!("HTTP server failed to bind {HTTP_SERVER_ADDRESS}: {error}");
                 log::error!("HTTP server 無法啟動於 {HTTP_SERVER_ADDRESS}: {error}");
                 return;
             }
         };
 
+        eprintln!("HTTP server started at http://{HTTP_SERVER_ADDRESS}");
         log::info!("HTTP server 已啟動：http://{HTTP_SERVER_ADDRESS}");
         for stream in listener.incoming() {
             match stream {
@@ -4221,11 +4224,13 @@ pub fn run() {
         .manage(input_queue.clone())
         .setup(|app| {
             if cfg!(debug_assertions) {
-                app.handle().plugin(
+                if let Err(err) = app.handle().plugin(
                     tauri_plugin_log::Builder::default()
                         .level(log::LevelFilter::Info)
                         .build(),
-                )?;
+                ) {
+                    eprintln!("failed to initialize debug log plugin: {err}");
+                }
             }
             start_http_server(input_queue, app.handle().clone());
             Ok(())

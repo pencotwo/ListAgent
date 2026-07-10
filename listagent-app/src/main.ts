@@ -2029,7 +2029,7 @@ async function flushLiveSessionNow(item: ListItem, endedAt?: number): Promise<st
       workingDirectory: item.workingDirectory,
       subdir: item.code,
       filename: meta.filename,
-      content: JSON.stringify(session, null, 2),
+      content: session,
     })
   })
   currentSessionWriteChains.set(item.id, write)
