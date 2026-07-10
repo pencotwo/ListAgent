@@ -1385,11 +1385,21 @@ async fn perform_execute_command_streaming(
         tokio::time::sleep(std::time::Duration::from_millis(50)).await;
     };
 
+    async fn drain_reader_task(mut task: tokio::task::JoinHandle<()>) {
+        if tokio::time::timeout(std::time::Duration::from_millis(250), &mut task)
+            .await
+            .is_err()
+        {
+            task.abort();
+            let _ = task.await;
+        }
+    }
+
     if let Some(task) = stdout_task {
-        let _ = task.await;
+        drain_reader_task(task).await;
     }
     if let Some(task) = stderr_task {
-        let _ = task.await;
+        drain_reader_task(task).await;
     }
     while let Ok((stream, line)) = rx.try_recv() {
         queue_line(stream, &line, &mut pending_output);
