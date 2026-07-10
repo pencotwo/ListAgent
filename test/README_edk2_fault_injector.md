@@ -1,7 +1,7 @@
 # EDK2 Fault Injector
 
 This is a small Python CLI for ListAgent repair testing. It randomly injects
-small build-breaking edits into EDK2 files:
+explicit build-breaking edits into EDK2 files:
 
 - `.c`
 - `.h`
@@ -27,16 +27,16 @@ Scan candidate files:
 python .\edk2_fault_injector.py scan
 ```
 
-Preview three random mutations:
+Preview five random mutations:
 
 ```powershell
-python .\edk2_fault_injector.py inject --count 3 --seed 1234
+python .\edk2_fault_injector.py inject --seed 1234
 ```
 
-Apply three random mutations:
+Apply five random mutations:
 
 ```powershell
-python .\edk2_fault_injector.py inject --count 3 --seed 1234 --apply
+python .\edk2_fault_injector.py inject --seed 1234 --apply
 ```
 
 Backups and a manifest are written under:

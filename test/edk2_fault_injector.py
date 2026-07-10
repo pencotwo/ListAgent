@@ -3,8 +3,8 @@
 EDK2 fault injector for ListAgent repair testing.
 
 By default this tool is dry-run only. It targets EDK2 source/config files and
-can inject small random build-breaking edits while saving backups and a JSON
-manifest for restoration.
+injects explicit build-breaking edits while saving backups and a JSON manifest
+for restoration.
 """
 
 from __future__ import annotations
@@ -26,6 +26,8 @@ DEFAULT_TARGET = Path(r"D:\BIOS\edk2")
 DEFAULT_EXTENSIONS = (".c", ".h", ".dec", ".dsc", ".inf", ".fdf")
 DEFAULT_BACKUP_ROOT = Path(__file__).resolve().parent / "edk2_fault_backups"
 MAX_FILE_BYTES = 2 * 1024 * 1024
+SOURCE_EXTENSIONS = {".c", ".h"}
+EDK2_METADATA_EXTENSIONS = {".dec", ".dsc", ".inf", ".fdf"}
 
 
 @dataclass
@@ -117,7 +119,11 @@ def mutate_delete_line(candidate: Candidate, rng: random.Random) -> Mutation | N
 
 def mutate_identifier_typo(candidate: Candidate, rng: random.Random) -> Mutation | None:
     pattern = re.compile(r"\b[A-Za-z_][A-Za-z0-9_]{5,}\b")
-    indexes = [i for i, line in enumerate(candidate.lines) if pattern.search(line) and not line.lstrip().startswith("//")]
+    indexes = [
+        i
+        for i, line in enumerate(candidate.lines)
+        if pattern.search(line) and not line.lstrip().startswith(("//", "/*", "*"))
+    ]
     if not indexes:
         return None
     idx = rng.choice(indexes)
@@ -147,37 +153,59 @@ def mutate_operator_flip(candidate: Candidate, rng: random.Random) -> Mutation |
 
 
 def mutate_insert_compile_error(candidate: Candidate, rng: random.Random) -> Mutation | None:
+    if candidate.path.suffix.lower() not in SOURCE_EXTENSIONS:
+        return None
     idx = rng.randrange(0, len(candidate.lines) + 1)
     before = ""
-    after = "LISTAGENT_FAULT_INJECTED_COMPILE_ERROR\n"
-    return Mutation("insert_compile_error", idx + 1, before, after, "Insert an invalid token line.")
+    after = "#error LISTAGENT_FAULT_INJECTED_COMPILE_ERROR\n"
+    return Mutation("insert_compile_error", idx + 1, before, after, "Insert an explicit C preprocessor error.")
+
+
+def mutate_insert_metadata_parse_error(candidate: Candidate, rng: random.Random) -> Mutation | None:
+    if candidate.path.suffix.lower() not in EDK2_METADATA_EXTENSIONS:
+        return None
+    idx = choose_line(candidate.lines, lambda line: bool(line.strip()) and not line.lstrip().startswith("#"), rng)
+    if idx is None:
+        idx = rng.randrange(0, len(candidate.lines) + 1)
+    before = ""
+    after = "LISTAGENT_FAULT_INJECTED_PARSE_ERROR ==\n"
+    return Mutation("insert_metadata_parse_error", idx + 1, before, after, "Insert an invalid EDK2 metadata statement.")
 
 
 def mutate_section_header(candidate: Candidate, rng: random.Random) -> Mutation | None:
-    if candidate.path.suffix.lower() not in {".dec", ".dsc", ".inf", ".fdf"}:
+    if candidate.path.suffix.lower() not in EDK2_METADATA_EXTENSIONS:
         return None
     idx = choose_line(candidate.lines, lambda line: line.strip().startswith("[") and line.strip().endswith("]"), rng)
     if idx is None:
         return None
     before = candidate.lines[idx]
-    after = before.replace("[", "[BROKEN_", 1)
+    newline = "\n" if before.endswith("\n") else ""
+    after = "[LISTAGENT_FAULT_INJECTED_PARSE_ERROR" + newline
     return Mutation("section_header_typo", idx + 1, before, after, "Corrupt one EDK2 section header.")
 
 
-MUTATORS = (
+STRONG_MUTATORS = (
+    mutate_insert_compile_error,
+    mutate_section_header,
+    mutate_insert_metadata_parse_error,
+)
+
+FALLBACK_MUTATORS = (
     mutate_comment_out_code,
     mutate_delete_line,
     mutate_identifier_typo,
     mutate_operator_flip,
-    mutate_insert_compile_error,
-    mutate_section_header,
 )
 
 
 def make_mutation(candidate: Candidate, rng: random.Random) -> Mutation | None:
-    mutators = list(MUTATORS)
-    rng.shuffle(mutators)
-    for mutator in mutators:
+    for mutator in STRONG_MUTATORS:
+        mutation = mutator(candidate, rng)
+        if mutation is not None:
+            return mutation
+    fallback_mutators = list(FALLBACK_MUTATORS)
+    rng.shuffle(fallback_mutators)
+    for mutator in fallback_mutators:
         mutation = mutator(candidate, rng)
         if mutation is not None:
             return mutation
@@ -342,7 +370,7 @@ def build_parser() -> argparse.ArgumentParser:
 
     p_inject = sub.add_parser("inject", help="Inject random faults. Dry-run unless --apply is set.")
     add_common(p_inject)
-    p_inject.add_argument("--count", type=int, default=3, help="Number of files to mutate.")
+    p_inject.add_argument("--count", type=int, default=5, help="Number of files to mutate.")
     p_inject.add_argument("--seed", type=int, default=None, help="Random seed for repeatable selection.")
     p_inject.add_argument("--run-id", default="", help="Optional backup run id.")
     p_inject.add_argument("--backup-root", type=Path, default=DEFAULT_BACKUP_ROOT)
