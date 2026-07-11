@@ -1242,6 +1242,11 @@ async function runItem(id: number, parameters?: unknown, execId?: string): Promi
         const pct = (cached / prompt * 100).toFixed(1)
         lines.push(`  Cache 命中率：${cached} / ${prompt} = ${pct}%`)
       }
+      lines.push(`  執行輪數：${summary.rounds.length}`)
+      const startedAt = currentSessionStartedAt.get(id)
+      const durationMs = startedAt ? (Date.now() - startedAt) : 0
+      const durationSec = (durationMs / 1000).toFixed(1)
+      lines.push(`  Total執行時間：${durationSec} 秒`)
       logs.push({ level: 'info', message: lines.join('\n'), timestamp: Date.now() })
     }
     logs.push({ level: 'system', message: `══════ Agent「${item.name}」執行結束 ══════`, timestamp: Date.now() + 1 })
