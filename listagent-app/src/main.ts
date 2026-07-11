@@ -1233,8 +1233,8 @@ async function runItem(id: number, parameters?: unknown, execId?: string): Promi
     // 統整 token 用量（總計），在結束分隔線之前顯示
     const summary = summarizeSessionTokens(id)
     if (summary.rounds.length > 0) {
-      const lines = ['📊 Token 用量統計：']
-      lines.push(`  合計：${formatUsage(summary.total)}`)
+      const lines = ['執行任務效率 :']
+      lines.push(`  📊 Token 用量統計：${formatUsage(summary.total)}`)
       // 顯示 cached_tokens 占 prompt 的比例
       const cached = summary.total.cachedTokens
       const prompt = summary.total.prompt
