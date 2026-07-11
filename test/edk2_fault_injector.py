@@ -33,6 +33,41 @@ EDK2_METADATA_EXTENSIONS = {".dec", ".dsc", ".inf", ".fdf"}
 BUILD_GRAPH_PARSE_EXTENSIONS = SOURCE_EXTENSIONS | EDK2_METADATA_EXTENSIONS | {".inc"}
 PATH_REF_RE = re.compile(r"(?i)([A-Za-z0-9_./+@-]+\.(?:c|h|dec|dsc|inf|fdf|inc))")
 WORKSPACE_REF_RE = re.compile(r"(?i)\$\(WORKSPACE\)[\\/]+([^ \t\r\n\"']+\.(?:c|h|dec|dsc|inf|fdf))")
+C_KEYWORDS = {
+    "auto",
+    "break",
+    "case",
+    "char",
+    "const",
+    "continue",
+    "default",
+    "do",
+    "double",
+    "else",
+    "enum",
+    "extern",
+    "float",
+    "for",
+    "goto",
+    "if",
+    "inline",
+    "int",
+    "long",
+    "register",
+    "return",
+    "short",
+    "signed",
+    "sizeof",
+    "static",
+    "struct",
+    "switch",
+    "typedef",
+    "union",
+    "unsigned",
+    "void",
+    "volatile",
+    "while",
+}
 
 
 @dataclass
@@ -274,11 +309,14 @@ def mutate_delete_line(candidate: Candidate, rng: random.Random) -> Mutation | N
 
 def mutate_identifier_typo(candidate: Candidate, rng: random.Random) -> Mutation | None:
     pattern = re.compile(r"\b[A-Za-z_][A-Za-z0-9_]{5,}\b")
-    indexes = [
-        i
-        for i, line in enumerate(candidate.lines)
-        if pattern.search(line) and not line.lstrip().startswith(("//", "/*", "*"))
-    ]
+    if candidate.path.suffix.lower() in SOURCE_EXTENSIONS:
+        indexes = [i for i in c_code_insert_indexes(candidate.lines) if pattern.search(candidate.lines[i])]
+    else:
+        indexes = [
+            i
+            for i, line in enumerate(candidate.lines)
+            if pattern.search(line) and not line.lstrip().startswith(("//", "/*", "*"))
+        ]
     if not indexes:
         return None
     idx = rng.choice(indexes)
@@ -307,16 +345,66 @@ def mutate_operator_flip(candidate: Candidate, rng: random.Random) -> Mutation |
     return Mutation("operator_flip", idx + 1, before, after, f"Replace {old!r} with {new!r}.")
 
 
-def mutate_insert_compile_error(candidate: Candidate, rng: random.Random) -> Mutation | None:
+def mutate_break_include_path(candidate: Candidate, rng: random.Random) -> Mutation | None:
     if candidate.path.suffix.lower() not in SOURCE_EXTENSIONS:
         return None
-    indexes = c_code_insert_indexes(candidate.lines)
+    include_re = re.compile(r"^(\s*#\s*include\s*[<\"])([^>\"]+)([>\"])(.*)$")
+    indexes = [i for i in c_code_insert_indexes(candidate.lines) if include_re.match(candidate.lines[i].rstrip("\r\n"))]
     if not indexes:
         return None
     idx = rng.choice(indexes)
-    before = ""
-    after = "#error LISTAGENT_FAULT_INJECTED_COMPILE_ERROR\n"
-    return Mutation("insert_compile_error", idx + 1, before, after, "Insert an explicit C preprocessor error before code.")
+    before = candidate.lines[idx]
+    match = include_re.match(before.rstrip("\r\n"))
+    if match is None:
+        return None
+    include_path = match.group(2)
+    include_name = Path(include_path)
+    if include_name.suffix:
+        broken_path = include_path[: -len(include_name.suffix)] + "_BROKEN" + include_name.suffix
+    else:
+        broken_path = include_path + "_BROKEN"
+    newline = "\n" if before.endswith("\n") else ""
+    after = f"{match.group(1)}{broken_path}{match.group(3)}{match.group(4)}{newline}"
+    return Mutation("break_include_path", idx + 1, before, after, "Reference a missing include file.")
+
+
+def mutate_remove_semicolon(candidate: Candidate, rng: random.Random) -> Mutation | None:
+    if candidate.path.suffix.lower() not in SOURCE_EXTENSIONS:
+        return None
+    indexes = [
+        i
+        for i in c_code_insert_indexes(candidate.lines)
+        if candidate.lines[i].rstrip().endswith(";") and not candidate.lines[i].lstrip().startswith("#")
+    ]
+    if not indexes:
+        return None
+    idx = rng.choice(indexes)
+    before = candidate.lines[idx]
+    body = before.rstrip("\r\n")
+    newline = "\n" if before.endswith("\n") else ""
+    after = body[:-1] + newline
+    return Mutation("remove_semicolon", idx + 1, before, after, "Remove a statement terminator.")
+
+
+def mutate_code_identifier_typo(candidate: Candidate, rng: random.Random) -> Mutation | None:
+    if candidate.path.suffix.lower() not in SOURCE_EXTENSIONS:
+        return None
+    identifier_re = re.compile(r"\b[A-Za-z_][A-Za-z0-9_]{4,}\b")
+    indexes = [
+        i
+        for i in c_code_insert_indexes(candidate.lines)
+        if not candidate.lines[i].lstrip().startswith("#") and identifier_re.search(candidate.lines[i])
+    ]
+    if not indexes:
+        return None
+    idx = rng.choice(indexes)
+    before = candidate.lines[idx]
+    matches = [m for m in identifier_re.finditer(before) if m.group(0) not in C_KEYWORDS]
+    if not matches:
+        return None
+    match = rng.choice(matches)
+    after = before[: match.start()] + match.group(0) + "_BROKEN" + before[match.end() :]
+    return Mutation("code_identifier_typo", idx + 1, before, after, "Rename one code identifier to an unresolved name.")
 
 
 def mutate_insert_metadata_parse_error(candidate: Candidate, rng: random.Random) -> Mutation | None:
@@ -342,8 +430,13 @@ def mutate_section_header(candidate: Candidate, rng: random.Random) -> Mutation 
     return Mutation("section_header_typo", idx + 1, before, after, "Corrupt one EDK2 section header.")
 
 
-STRONG_MUTATORS = (
-    mutate_insert_compile_error,
+SOURCE_STRONG_MUTATORS = (
+    mutate_break_include_path,
+    mutate_remove_semicolon,
+    mutate_code_identifier_typo,
+)
+
+METADATA_STRONG_MUTATORS = (
     mutate_section_header,
     mutate_insert_metadata_parse_error,
 )
@@ -357,7 +450,10 @@ FALLBACK_MUTATORS = (
 
 
 def make_mutation(candidate: Candidate, rng: random.Random) -> Mutation | None:
-    for mutator in STRONG_MUTATORS:
+    suffix = candidate.path.suffix.lower()
+    strong_mutators = list(SOURCE_STRONG_MUTATORS if suffix in SOURCE_EXTENSIONS else METADATA_STRONG_MUTATORS)
+    rng.shuffle(strong_mutators)
+    for mutator in strong_mutators:
         mutation = mutator(candidate, rng)
         if mutation is not None:
             return mutation

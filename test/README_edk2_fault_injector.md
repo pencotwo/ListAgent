@@ -26,6 +26,10 @@ D:\BIOS\edk2
 The tool is dry-run by default. It will not modify files unless `--apply` is
 provided.
 
+For C/H files, source mutations use natural breakage patterns such as missing
+includes, removed semicolons, or unresolved identifier typos. They do not inject
+preprocessor `#error` lines and avoid comment-only regions.
+
 ## Usage
 
 Scan candidate files:
