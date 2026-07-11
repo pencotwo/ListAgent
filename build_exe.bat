@@ -28,6 +28,11 @@ if not exist "%EXE%" (
 )
 
 copy /y "%EXE%" "..\ListAgent.exe" > nul
+if %errorlevel% neq 0 (
+    echo [ERROR] Copy to ..\ListAgent.exe failed. Please check if ListAgent.exe is currently running.
+    pause
+    exit /b 1
+)
 echo.
 echo [OK] Build complete.
 echo Output: %~dp0ListAgent.exe
