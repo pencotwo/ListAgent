@@ -24,10 +24,15 @@ from typing import Callable, Iterable
 
 DEFAULT_TARGET = Path(r"D:\BIOS\edk2")
 DEFAULT_EXTENSIONS = (".c", ".h", ".dec", ".dsc", ".inf", ".fdf")
+DEFAULT_ACTIVE_PLATFORM = "EmulatorPkg/EmulatorPkg.dsc"
+DEFAULT_BUILD_OUTPUT = Path("Build/EmulatorIA32/DEBUG_VS2026/IA32")
 DEFAULT_BACKUP_ROOT = Path(__file__).resolve().parent / "edk2_fault_backups"
 MAX_FILE_BYTES = 2 * 1024 * 1024
 SOURCE_EXTENSIONS = {".c", ".h"}
 EDK2_METADATA_EXTENSIONS = {".dec", ".dsc", ".inf", ".fdf"}
+BUILD_GRAPH_PARSE_EXTENSIONS = SOURCE_EXTENSIONS | EDK2_METADATA_EXTENSIONS | {".inc"}
+PATH_REF_RE = re.compile(r"(?i)([A-Za-z0-9_./+@-]+\.(?:c|h|dec|dsc|inf|fdf|inc))")
+WORKSPACE_REF_RE = re.compile(r"(?i)\$\(WORKSPACE\)[\\/]+([^ \t\r\n\"']+\.(?:c|h|dec|dsc|inf|fdf))")
 
 
 @dataclass
@@ -80,6 +85,126 @@ def iter_files(root: Path, extensions: Iterable[str]) -> Iterable[Path]:
             yield path
 
 
+def normalize_edk2_rel_path(path_text: str) -> str:
+    return path_text.strip().strip("\"'").replace("\\", "/")
+
+
+def split_edk2_comment(line: str) -> str:
+    return line.split("#", 1)[0]
+
+
+def referenced_paths_from_text(text: str) -> Iterable[str]:
+    for line in text.splitlines():
+        uncommented = split_edk2_comment(line)
+        for match in PATH_REF_RE.finditer(uncommented):
+            yield normalize_edk2_rel_path(match.group(1))
+
+
+def resolve_edk2_path(root: Path, rel_path: str) -> Path | None:
+    if "$" in rel_path:
+        return None
+    path = (root / rel_path).resolve()
+    try:
+        path.relative_to(root)
+    except ValueError:
+        return None
+    return path
+
+
+def add_unique_path(paths: list[Path], seen: set[Path], path: Path, suffixes: set[str]) -> None:
+    if path.suffix.lower() not in suffixes or not path.exists():
+        return
+    resolved = path.resolve()
+    if resolved in seen:
+        return
+    seen.add(resolved)
+    paths.append(resolved)
+
+
+def build_output_files(root: Path, build_output: Path, extensions: Iterable[str]) -> list[Path]:
+    suffixes = {ext.lower() for ext in extensions}
+    build_root = build_output if build_output.is_absolute() else root / build_output
+    if not build_root.exists():
+        return []
+
+    candidates: list[Path] = []
+    seen: set[Path] = set()
+    for makefile in build_root.rglob("Makefile"):
+        text = read_text_lossless(makefile)
+        if text is None:
+            continue
+
+        module_dir: Path | None = None
+        module_file = ""
+        for line in text.splitlines():
+            key, sep, value = line.partition("=")
+            if not sep:
+                continue
+            key = key.strip()
+            value = value.strip()
+            if key == "MODULE_DIR":
+                module_dir = Path(value)
+            elif key == "MODULE_FILE":
+                module_file = value
+        if module_dir is not None and module_file:
+            module_path = (module_dir / module_file).resolve()
+            try:
+                module_path.relative_to(root)
+            except ValueError:
+                module_path = None
+            if module_path is not None:
+                add_unique_path(candidates, seen, module_path, suffixes)
+
+        for match in WORKSPACE_REF_RE.finditer(text):
+            ref_path = resolve_edk2_path(root, normalize_edk2_rel_path(match.group(1)))
+            if ref_path is not None:
+                add_unique_path(candidates, seen, ref_path, suffixes)
+
+    return candidates
+
+
+def build_graph_files(root: Path, platform: str, extensions: Iterable[str]) -> list[Path]:
+    suffixes = {ext.lower() for ext in extensions}
+    parse_queue: list[Path] = []
+    candidates: list[Path] = []
+    seen_parse: set[Path] = set()
+    seen_candidates: set[Path] = set()
+
+    def add_candidate(path: Path) -> None:
+        if path.suffix.lower() not in suffixes or path in seen_candidates or not path.exists():
+            return
+        seen_candidates.add(path)
+        candidates.append(path)
+
+    def enqueue(path: Path) -> None:
+        if path.suffix.lower() not in BUILD_GRAPH_PARSE_EXTENSIONS or path in seen_parse or not path.exists():
+            return
+        seen_parse.add(path)
+        parse_queue.append(path)
+        add_candidate(path)
+
+    platform_path = resolve_edk2_path(root, platform)
+    if platform_path is None or not platform_path.exists():
+        return []
+
+    enqueue(platform_path)
+
+    while parse_queue:
+        current = parse_queue.pop(0)
+        text = read_text_lossless(current)
+        if text is None:
+            continue
+        for ref in referenced_paths_from_text(text):
+            ref_path = resolve_edk2_path(root, ref)
+            if ref_path is None or not ref_path.exists():
+                continue
+            add_candidate(ref_path)
+            if ref_path.suffix.lower() in {".dsc", ".fdf", ".inf", ".inc"}:
+                enqueue(ref_path)
+
+    return candidates
+
+
 def load_candidate(path: Path) -> Candidate | None:
     text = read_text_lossless(path)
     if text is None or not text.strip():
@@ -92,6 +217,36 @@ def choose_line(lines: list[str], predicate: Callable[[str], bool], rng: random.
     if not indexes:
         return None
     return rng.choice(indexes)
+
+
+def c_code_insert_indexes(lines: list[str]) -> list[int]:
+    indexes: list[int] = []
+    in_block_comment = False
+    for i, line in enumerate(lines):
+        stripped = line.lstrip()
+        line_starts_in_comment = in_block_comment
+        pos = 0
+        while pos < len(line):
+            if in_block_comment:
+                end = line.find("*/", pos)
+                if end == -1:
+                    break
+                in_block_comment = False
+                pos = end + 2
+                continue
+            line_comment = line.find("//", pos)
+            block_start = line.find("/*", pos)
+            if block_start == -1 or (line_comment != -1 and line_comment < block_start):
+                break
+            in_block_comment = True
+            pos = block_start + 2
+
+        if line_starts_in_comment:
+            continue
+        if not stripped or stripped.startswith(("//", "/*", "*")):
+            continue
+        indexes.append(i)
+    return indexes
 
 
 def mutate_comment_out_code(candidate: Candidate, rng: random.Random) -> Mutation | None:
@@ -155,10 +310,13 @@ def mutate_operator_flip(candidate: Candidate, rng: random.Random) -> Mutation |
 def mutate_insert_compile_error(candidate: Candidate, rng: random.Random) -> Mutation | None:
     if candidate.path.suffix.lower() not in SOURCE_EXTENSIONS:
         return None
-    idx = rng.randrange(0, len(candidate.lines) + 1)
+    indexes = c_code_insert_indexes(candidate.lines)
+    if not indexes:
+        return None
+    idx = rng.choice(indexes)
     before = ""
     after = "#error LISTAGENT_FAULT_INJECTED_COMPILE_ERROR\n"
-    return Mutation("insert_compile_error", idx + 1, before, after, "Insert an explicit C preprocessor error.")
+    return Mutation("insert_compile_error", idx + 1, before, after, "Insert an explicit C preprocessor error before code.")
 
 
 def mutate_insert_metadata_parse_error(candidate: Candidate, rng: random.Random) -> Mutation | None:
@@ -166,7 +324,7 @@ def mutate_insert_metadata_parse_error(candidate: Candidate, rng: random.Random)
         return None
     idx = choose_line(candidate.lines, lambda line: bool(line.strip()) and not line.lstrip().startswith("#"), rng)
     if idx is None:
-        idx = rng.randrange(0, len(candidate.lines) + 1)
+        return None
     before = ""
     after = "LISTAGENT_FAULT_INJECTED_PARSE_ERROR ==\n"
     return Mutation("insert_metadata_parse_error", idx + 1, before, after, "Insert an invalid EDK2 metadata statement.")
@@ -232,6 +390,14 @@ def backup_path_for(backup_dir: Path, rel_path: str) -> Path:
     return backup_dir / rel_path
 
 
+def optional_path(value: str) -> Path | None:
+    return None if value.lower() in {"", "none", "off", "false"} else Path(value)
+
+
+def optional_text(value: str) -> str:
+    return "" if value.lower() in {"", "none", "off", "false"} else value
+
+
 def inject(args: argparse.Namespace) -> int:
     root = args.root.resolve()
     if not root.exists() or not root.is_dir():
@@ -239,8 +405,27 @@ def inject(args: argparse.Namespace) -> int:
         return 2
 
     rng = random.Random(args.seed)
-    files = list(iter_files(root, args.extensions))
-    rng.shuffle(files)
+    output_files: list[Path] = []
+    if args.build_output:
+        output_files = build_output_files(root, args.build_output, args.extensions)
+        rng.shuffle(output_files)
+    build_files: list[Path] = []
+    if args.active_platform:
+        build_files = build_graph_files(root, args.active_platform, args.extensions)
+        fixed_build_files = build_files[:2]
+        shuffled_build_files = build_files[2:]
+        rng.shuffle(shuffled_build_files)
+        build_files = fixed_build_files + shuffled_build_files
+    fallback_files = list(iter_files(root, args.extensions))
+    rng.shuffle(fallback_files)
+    seen_files: set[Path] = set()
+    files: list[Path] = []
+    for path in output_files + build_files + fallback_files:
+        resolved = path.resolve()
+        if resolved in seen_files:
+            continue
+        seen_files.add(resolved)
+        files.append(resolved)
     selected: list[tuple[Candidate, Mutation]] = []
     for path in files:
         candidate = load_candidate(path)
@@ -265,11 +450,19 @@ def inject(args: argparse.Namespace) -> int:
         "root": str(root),
         "dry_run": not args.apply,
         "seed": args.seed,
+        "build_output": str(args.build_output) if args.build_output else "",
+        "build_output_candidates": len(output_files),
+        "active_platform": args.active_platform,
+        "build_graph_candidates": len(build_files),
         "files": [],
     }
 
     print(f"Run id: {run_id}")
     print(f"Target: {root}")
+    if args.build_output:
+        print(f"Build output: {args.build_output} ({len(output_files)} compiled candidate(s))")
+    if args.active_platform:
+        print(f"Active platform: {args.active_platform} ({len(build_files)} build-graph candidate(s))")
     print(f"Mode: {'APPLY' if args.apply else 'DRY-RUN'}")
     print("")
 
@@ -339,8 +532,14 @@ def restore(args: argparse.Namespace) -> int:
 
 def scan(args: argparse.Namespace) -> int:
     root = args.root.resolve()
-    files = list(iter_files(root, args.extensions))
+    output_files = build_output_files(root, args.build_output, args.extensions) if args.build_output else []
+    build_files = build_graph_files(root, args.active_platform, args.extensions) if args.active_platform else []
+    files = output_files or build_files or list(iter_files(root, args.extensions))
     print(f"Target: {root}")
+    if args.build_output:
+        print(f"Build output: {args.build_output}")
+    if args.active_platform:
+        print(f"Active platform: {args.active_platform}")
     print(f"Extensions: {', '.join(args.extensions)}")
     print(f"Files: {len(files)}")
     for path in files[: args.limit]:
@@ -356,6 +555,21 @@ def build_parser() -> argparse.ArgumentParser:
 
     def add_common(p: argparse.ArgumentParser) -> None:
         p.add_argument("--root", type=Path, default=DEFAULT_TARGET, help=f"EDK2 root. Default: {DEFAULT_TARGET}")
+        p.add_argument(
+            "--build-output",
+            type=optional_path,
+            default=DEFAULT_BUILD_OUTPUT,
+            help=(
+                "Prefer files from this build output directory's generated Makefiles. "
+                "Use an empty string to skip build-output targeting."
+            ),
+        )
+        p.add_argument(
+            "--active-platform",
+            type=optional_text,
+            default=DEFAULT_ACTIVE_PLATFORM,
+            help="Prefer files referenced by this active platform DSC. Use 'none' to scan the whole tree.",
+        )
         p.add_argument(
             "--extensions",
             nargs="+",
