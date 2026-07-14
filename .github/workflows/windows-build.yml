@@ -3,9 +3,13 @@ name: Windows Build
 on:
   push:
     branches: [main, master]
+    tags: ["v*"]
   pull_request:
     branches: [main, master]
   workflow_dispatch:
+
+permissions:
+  contents: write
 
 jobs:
   build:
@@ -46,3 +50,14 @@ jobs:
           name: ListAgent-windows
           path: listagent-app/src-tauri/target/release/ListAgent.exe
           if-no-files-found: error
+
+      - name: Attach to release
+        if: startsWith(github.ref, 'refs/tags/v')
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        shell: bash
+        run: |
+          TAG="${{ github.ref_name }}"
+          gh release view "$TAG" --repo "${{ github.repository }}" >/dev/null 2>&1 \
+            || gh release create "$TAG" --repo "${{ github.repository }}" --title "$TAG" --generate-notes
+          gh release upload "$TAG" src-tauri/target/release/ListAgent.exe --repo "${{ github.repository }}" --clobber
