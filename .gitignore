@@ -27,4 +27,5 @@ test/edk2_fault_backups/
 test/Summary.xlsx
 test/排程.txt
 test_result.xlsx
+fix_xlsx_dimension.py
 
