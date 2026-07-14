@@ -28,6 +28,7 @@ interface SkillMeta {
   id: string
   name: string
   description: string
+  version?: string
 }
 
 interface McpServerConfig {
@@ -617,6 +618,23 @@ const btnGlobalSettingsCancel = document.getElementById('btn-global-settings-can
 const execFontSizeVal = document.getElementById('exec-font-size-val') as HTMLElement
 const btnExecFontInc = document.getElementById('btn-exec-font-inc') as HTMLButtonElement
 const btnExecFontDec = document.getElementById('btn-exec-font-dec') as HTMLButtonElement
+
+// Skills管理與編輯器元素
+const settingsSkillsList = document.getElementById('settings-skills-list') as HTMLElement
+const btnCreateSkill = document.getElementById('btn-create-skill') as HTMLButtonElement
+
+const skillEditorOverlay = document.getElementById('skill-editor-overlay') as HTMLElement
+const skillEditorTitle = document.getElementById('skill-editor-title') as HTMLElement
+const btnCloseSkillEditor = document.getElementById('btn-close-skill-editor') as HTMLButtonElement
+const btnSkillEditorSave = document.getElementById('btn-skill-editor-save') as HTMLButtonElement
+const btnSkillEditorCancel = document.getElementById('btn-skill-editor-cancel') as HTMLButtonElement
+const inputSkillId = document.getElementById('input-skill-id') as HTMLInputElement
+const inputSkillDisplayName = document.getElementById('input-skill-display-name') as HTMLInputElement
+const inputSkillVersion = document.getElementById('input-skill-version') as HTMLInputElement
+const inputSkillDescription = document.getElementById('input-skill-description') as HTMLTextAreaElement
+const inputSkillPrompt = document.getElementById('input-skill-prompt') as HTMLTextAreaElement
+
+let editingSkillId: string | null = null
 
 let globalEmbeddingApiBaseUrl = ''
 let globalEmbeddingApiKey = ''
@@ -3210,11 +3228,167 @@ function openGlobalSettings(): void {
   inputEmbeddingModel.value = globalEmbeddingModel
   applyFontSizes()
   globalSettingsOverlay.classList.remove('hidden')
+  void loadAndRenderSettingsSkills()
 }
 
 /** 關閉全域設定對話框 */
 function closeGlobalSettings(): void {
   globalSettingsOverlay.classList.add('hidden')
+}
+
+/** 載入並渲染全域設定中的 Skills 列表 */
+async function loadAndRenderSettingsSkills(): Promise<void> {
+  settingsSkillsList.innerHTML = '<div style="color: var(--text-muted); font-size: 13px; padding: 4px;">載入中…</div>'
+  let skills: SkillMeta[] = []
+  try {
+    skills = isTauri() ? await invoke<SkillMeta[]>('list_skills') : []
+  } catch (e) {
+    console.error('Failed to load skills:', e)
+  }
+  
+  if (skills.length === 0) {
+    settingsSkillsList.innerHTML = '<div style="color: var(--text-muted); font-size: 13px; padding: 4px;">尚未建立任何 Skill。</div>'
+    return
+  }
+  
+  settingsSkillsList.innerHTML = skills.map(skill => `
+    <div class="settings-skill-item">
+      <div class="settings-skill-info">
+        <span class="settings-skill-name">${escapeHtml(skill.name)} ${skill.version ? `<span style="font-size: 10px; font-weight: normal; padding: 2px 5px; border-radius: 4px; background: rgba(99, 102, 241, 0.15); color: var(--accent); margin-left: 4px;">v${escapeHtml(skill.version)}</span>` : ''} <span style="font-size: 11px; font-weight: normal; color: var(--text-muted);">(${escapeHtml(skill.id)})</span></span>
+        <span class="settings-skill-desc">${escapeHtml(skill.description || '無描述')}</span>
+      </div>
+      <div class="settings-skill-actions">
+        <button type="button" class="btn-xs btn-xs-primary edit-skill-btn" data-id="${escapeHtml(skill.id)}">✏️ 編輯</button>
+        <button type="button" class="btn-xs btn-xs-danger delete-skill-btn" data-id="${escapeHtml(skill.id)}">🗑️ 刪除</button>
+      </div>
+    </div>
+  `).join('')
+  
+  // 綁定編輯與刪除按鈕
+  settingsSkillsList.querySelectorAll('.edit-skill-btn').forEach(btn => {
+    btn.addEventListener('click', (e) => {
+      const id = (e.currentTarget as HTMLElement).dataset.id || ''
+      void openSkillEditor(id)
+    })
+  })
+  
+  settingsSkillsList.querySelectorAll('.delete-skill-btn').forEach(btn => {
+    btn.addEventListener('click', (e) => {
+      const id = (e.currentTarget as HTMLElement).dataset.id || ''
+      void deleteSkillAction(id)
+    })
+  })
+}
+
+/** 開啟 Skill 編輯器對話框 */
+async function openSkillEditor(id: string | null): Promise<void> {
+  editingSkillId = id
+  if (id === null) {
+    skillEditorTitle.textContent = '＋ 新增 Skill'
+    inputSkillId.value = ''
+    inputSkillId.disabled = false
+    inputSkillDisplayName.value = ''
+    inputSkillVersion.value = '1.0.0'
+    inputSkillDescription.value = ''
+    inputSkillPrompt.value = ''
+  } else {
+    skillEditorTitle.textContent = '✏️ 編輯 Skill'
+    inputSkillId.value = id
+    inputSkillId.disabled = true
+    
+    try {
+      const skillData: any = await invoke('read_skill', { id })
+      inputSkillDisplayName.value = skillData.display_name || skillData.name || ''
+      inputSkillVersion.value = skillData.version || ''
+      inputSkillDescription.value = skillData.description || ''
+      inputSkillPrompt.value = skillData.system_prompt || skillData.prompt || ''
+    } catch (e) {
+      window.alert(`讀取 Skill 失敗：${String(e)}`)
+      return
+    }
+  }
+  
+  skillEditorOverlay.classList.remove('hidden')
+}
+
+/** 儲存 Skill */
+async function saveSkillAction(): Promise<void> {
+  const id = inputSkillId.value.trim()
+  const displayName = inputSkillDisplayName.value.trim()
+  const version = inputSkillVersion.value.trim()
+  const description = inputSkillDescription.value.trim()
+  const promptText = inputSkillPrompt.value.trim()
+  
+  if (!id) {
+    window.alert('請輸入 Skill ID')
+    return
+  }
+  
+  if (editingSkillId === null) {
+    const safeId = id.replace(/[^a-zA-Z0-9-_]/g, '')
+    if (safeId !== id) {
+      window.alert('Skill ID 僅能包含英數字、底線 (_) 與連字號 (-)')
+      return
+    }
+  }
+  
+  if (!displayName) {
+    window.alert('請輸入顯示名稱')
+    return
+  }
+  
+  const skillData = {
+    name: id,
+    display_name: displayName,
+    version: version,
+    description: description,
+    system_prompt: promptText
+  }
+  
+  try {
+    await invoke('save_skill', { id, skillData })
+    skillEditorOverlay.classList.add('hidden')
+    
+    // 重新整理全域設定中的 Skills 列表
+    await loadAndRenderSettingsSkills()
+    
+    // 同步更新當前 Agent 設定中的 Skills 清單
+    const item = items.find((i) => i.id === editingItemId)
+    if (item) {
+      const checked = getCheckedSkills()
+      await loadAndRenderSkills(checked)
+    } else {
+      await loadAndRenderSkills([])
+    }
+  } catch (e) {
+    window.alert(`儲存 Skill 失敗：${String(e)}`)
+  }
+}
+
+/** 刪除 Skill */
+async function deleteSkillAction(id: string): Promise<void> {
+  if (!window.confirm(`確定要刪除 Skill 「${id}」嗎？此動作將會刪除該 JSON 檔案，且無法復原。`)) {
+    return
+  }
+  
+  try {
+    await invoke('delete_skill', { id })
+    
+    // 重新整理全域設定中的 Skills 列表
+    await loadAndRenderSettingsSkills()
+    
+    // 同步更新當前 Agent 設定中的 Skills 清單，移除被刪除的選項
+    const item = items.find((i) => i.id === editingItemId)
+    if (item) {
+      const checked = getCheckedSkills()
+      const newChecked = checked.filter(c => c !== id)
+      await loadAndRenderSkills(newChecked)
+    } else {
+      await loadAndRenderSkills([])
+    }
+  } catch (e) {
+    window.alert(`刪除 Skill 失敗：${String(e)}`)
+  }
 }
 
 /** 刪除 Agent */
@@ -3547,6 +3721,31 @@ let globalSettingsOverlayMousedownOnBg = false
 globalSettingsOverlay.addEventListener('mousedown', (e) => { globalSettingsOverlayMousedownOnBg = e.target === globalSettingsOverlay })
 globalSettingsOverlay.addEventListener('click', (e) => {
   if (e.target === globalSettingsOverlay && globalSettingsOverlayMousedownOnBg) closeGlobalSettings()
+})
+
+// Skill 編輯器事件繫結
+btnCreateSkill.addEventListener('click', () => {
+  void openSkillEditor(null)
+})
+
+const closeSkillEditor = () => {
+  skillEditorOverlay.classList.add('hidden')
+}
+btnCloseSkillEditor.addEventListener('click', closeSkillEditor)
+btnSkillEditorCancel.addEventListener('click', closeSkillEditor)
+
+let skillEditorOverlayMousedownOnBg = false
+skillEditorOverlay.addEventListener('mousedown', (e) => {
+  skillEditorOverlayMousedownOnBg = e.target === skillEditorOverlay
+})
+skillEditorOverlay.addEventListener('click', (e) => {
+  if (e.target === skillEditorOverlay && skillEditorOverlayMousedownOnBg) {
+    closeSkillEditor()
+  }
+})
+
+btnSkillEditorSave.addEventListener('click', () => {
+  void saveSkillAction()
 })
 
 /** 手動重新取得 MCP 工具 */

@@ -247,6 +247,15 @@
               </div>
             </div>
           </fieldset>
+
+          <fieldset class="skills-management-group">
+            <legend>🤖 Skills 範本管理</legend>
+            <p class="tool-hint">在此新增、編輯或刪除全域的 Skill 範本（檔案儲存在 skills/ 目錄下）。</p>
+            <div id="settings-skills-list" class="settings-skills-list"></div>
+            <div style="margin-top: 10px;">
+              <button type="button" id="btn-create-skill" class="btn btn-secondary" style="padding: 6px 12px; font-size: 13px;">＋ 新增 Skill</button>
+            </div>
+          </fieldset>
         </div>
 
         <div class="dialog-footer">
@@ -327,6 +336,45 @@
 
         <div class="dialog-footer">
           <button id="btn-close-events-footer" class="btn btn-secondary">關閉</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Skill 編輯器對話框 (預設隱藏) -->
+    <div id="skill-editor-overlay" class="overlay hidden" style="z-index: 1100;">
+      <div id="skill-editor-dialog" class="dialog skill-editor-dialog">
+        <div class="dialog-header">
+          <h2 id="skill-editor-title">📝 編輯 Skill</h2>
+          <button id="btn-close-skill-editor" class="btn-icon" title="關閉">✕</button>
+        </div>
+
+        <div class="dialog-body">
+          <div class="field">
+            <label class="form-label" for="input-skill-id">Skill ID (檔名)</label>
+            <input id="input-skill-id" class="form-input" type="text" placeholder="例如：my-custom-skill (僅限字母、數字、底線與連字號)" />
+            <p class="field-hint" id="input-skill-id-hint" style="font-size: 11px; margin-top: 4px; color: var(--text-muted);">儲存後將寫入為 {ID}.json</p>
+          </div>
+          <div class="field">
+            <label class="form-label" for="input-skill-display-name">顯示名稱 (Display Name)</label>
+            <input id="input-skill-display-name" class="form-input" type="text" placeholder="例如：Custom Skill" />
+          </div>
+          <div class="field">
+            <label class="form-label" for="input-skill-version">版本 (Version)</label>
+            <input id="input-skill-version" class="form-input" type="text" placeholder="例如：1.0.0" />
+          </div>
+          <div class="field">
+            <label class="form-label" for="input-skill-description">描述 (Description)</label>
+            <textarea id="input-skill-description" class="form-input" rows="2" placeholder="簡短描述此 Skill 的用途..."></textarea>
+          </div>
+          <div class="field">
+            <label class="form-label" for="input-skill-prompt">System Prompt</label>
+            <textarea id="input-skill-prompt" class="form-input" rows="8" style="font-family: monospace;" placeholder="輸入給 AI 的 Skill 指令或工作流程..."></textarea>
+          </div>
+        </div>
+
+        <div class="dialog-footer">
+          <button id="btn-skill-editor-save" class="btn btn-primary">💾 儲存 Skill</button>
+          <button id="btn-skill-editor-cancel" class="btn btn-secondary">取消</button>
         </div>
       </div>
     </div>

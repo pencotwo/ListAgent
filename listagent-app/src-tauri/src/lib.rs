@@ -529,6 +529,7 @@ pub struct SkillMeta {
     pub id: String,
     pub name: String,
     pub description: String,
+    pub version: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -543,6 +544,8 @@ struct SkillFile {
     prompt: Option<String>,
     #[serde(default)]
     system_prompt: Option<String>,
+    #[serde(default)]
+    version: Option<String>,
 }
 
 fn read_skill_file(id: &str, path: &Path) -> Option<(SkillMeta, String)> {
@@ -571,6 +574,7 @@ fn read_skill_file(id: &str, path: &Path) -> Option<(SkillMeta, String)> {
             id: id.to_string(),
             name,
             description,
+            version: parsed.version,
         },
         prompt,
     ))
@@ -600,6 +604,49 @@ fn list_skills() -> Result<Vec<SkillMeta>, String> {
     skills.sort_by(|a, b| a.name.cmp(&b.name));
     Ok(skills)
 }
+
+#[tauri::command]
+fn read_skill(id: String) -> Result<serde_json::Value, String> {
+    let dir = skills_dir();
+    let path = dir.join(format!("{id}.json"));
+    if !path.exists() {
+        return Err("Skill file not found".to_string());
+    }
+    let raw = fs::read_to_string(&path).map_err(|e| e.to_string())?;
+    let parsed: serde_json::Value = serde_json::from_str(&raw).map_err(|e| e.to_string())?;
+    Ok(parsed)
+}
+
+#[tauri::command]
+fn save_skill(id: String, skill_data: serde_json::Value) -> Result<(), String> {
+    let dir = skills_dir();
+    if !dir.exists() {
+        fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+    }
+    let safe_id: String = id.chars().filter(|c| c.is_alphanumeric() || *c == '-' || *c == '_').collect();
+    if safe_id.is_empty() || safe_id != id {
+        return Err("Invalid skill ID. Only letters, numbers, hyphens, and underscores are allowed.".to_string());
+    }
+    let path = dir.join(format!("{safe_id}.json"));
+    let formatted = serde_json::to_string_pretty(&skill_data).map_err(|e| e.to_string())?;
+    fs::write(&path, formatted).map_err(|e| e.to_string())?;
+    Ok(())
+}
+
+#[tauri::command]
+fn delete_skill(id: String) -> Result<(), String> {
+    let dir = skills_dir();
+    let safe_id: String = id.chars().filter(|c| c.is_alphanumeric() || *c == '-' || *c == '_').collect();
+    if safe_id.is_empty() || safe_id != id {
+        return Err("Invalid skill ID".to_string());
+    }
+    let path = dir.join(format!("{safe_id}.json"));
+    if path.exists() {
+        fs::remove_file(&path).map_err(|e| e.to_string())?;
+    }
+    Ok(())
+}
+
 
 fn load_skill_prompts(skills: &[String]) -> Vec<(String, String)> {
     let dir = skills_dir();
@@ -4244,6 +4291,9 @@ pub fn run() {
             list_sessions,
             read_session_file,
             list_skills,
+            read_skill,
+            save_skill,
+            delete_skill,
             list_mcp_server_tools,
             update_agent_status,
             send_agent_message

@@ -33,3 +33,10 @@ tokio = { version = "1", features = ["time", "process", "io-util"] }
 chrono = { version = "0.4", default-features = false, features = ["clock"] }
 chrono-tz = "0.10"
 iana-time-zone = "0.1"
+
+[profile.release]
+opt-level = "z"        # Optimize for size
+lto = true             # Enable link-time optimization
+codegen-units = 1      # Maximize optimizations by using a single codegen unit
+panic = "abort"        # Disable panic unwinding to save size
+strip = true           # Strip symbols from the executable

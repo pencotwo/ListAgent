@@ -18,3 +18,13 @@ logs/
 Thumbs.db
 Desktop.ini
 
+# Runtime/session data and build output
+.ListAgent/
+ListAgent.exe
+__pycache__/
+workspace/
+test/edk2_fault_backups/
+test/Summary.xlsx
+test/排程.txt
+test_result.xlsx
+
