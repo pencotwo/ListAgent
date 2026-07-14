@@ -1,0 +1,48 @@
+name: Windows Build
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+    branches: [main, master]
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: windows-latest
+
+    defaults:
+      run:
+        working-directory: listagent-app
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: listagent-app/package-lock.json
+
+      - name: Setup Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Cache Rust build
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: listagent-app/src-tauri -> target
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build portable executable
+        run: npx tauri build --no-bundle
+
+      - name: Upload ListAgent.exe
+        uses: actions/upload-artifact@v4
+        with:
+          name: ListAgent-windows
+          path: listagent-app/src-tauri/target/release/ListAgent.exe
+          if-no-files-found: error
