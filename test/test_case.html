@@ -225,6 +225,19 @@
       border-color: var(--text-muted);
     }
 
+    .btn-danger {
+      background: linear-gradient(135deg, #ef4444, #dc2626);
+      color: white;
+      box-shadow: 0 4px 14px 0 rgba(239, 68, 68, 0.3);
+    }
+    .btn-danger:hover:not(:disabled) {
+      transform: translateY(-1px);
+      box-shadow: 0 0 20px 4px rgba(239, 68, 68, 0.45);
+    }
+    .btn-danger:active:not(:disabled) {
+      transform: translateY(0);
+    }
+
     .btn:disabled {
       opacity: 0.5;
       cursor: not-allowed;
@@ -566,6 +579,9 @@
       <button class="btn btn-primary" id="btn-run-all" disabled>
         <span>▶</span> Run All Tests
       </button>
+      <button class="btn btn-danger" id="btn-stop-all" disabled>
+        <span>■</span> Stop
+      </button>
     </div>
 
     <!-- Left column: Test cases list -->
@@ -689,12 +705,14 @@
     let testCases = [];
     let currentSelectedCaseIndex = null;
     let isRunningAll = false;
+    let stopRequested = false;
     let isServerOnline = false;
 
     // DOM Elements
     const agentSelect = document.getElementById('agent-select');
     const btnRefreshAgents = document.getElementById('btn-refresh-agents');
     const btnRunAll = document.getElementById('btn-run-all');
+    const btnStopAll = document.getElementById('btn-stop-all');
     const testCasesList = document.getElementById('test-cases-list');
     const fileInput = document.getElementById('file-input');
     const jsonEditor = document.getElementById('json-editor');
@@ -739,6 +757,12 @@
       // Setup Listeners
       btnRefreshAgents.addEventListener('click', fetchAgents);
       btnRunAll.addEventListener('click', runAllTests);
+      btnStopAll.addEventListener('click', () => {
+        stopRequested = true;
+        btnStopAll.disabled = true;
+        btnStopAll.innerHTML = '<span>■</span> Stopping...';
+        onTestFinished();
+      });
       btnEditorApply.addEventListener('click', applyEditorJson);
       agentSelect.addEventListener('change', () => {
         if (currentSelectedCaseIndex !== null) {
@@ -892,6 +916,8 @@
       if (isServerOnline && agents.some(a => a.allowHttp)) {
         btnRunAll.disabled = false;
       }
+      btnStopAll.disabled = true;
+      btnStopAll.innerHTML = '<span>■</span> Stop';
       currentSelectedCaseIndex = null;
       testDetailPlaceholder.style.display = 'block';
       testDetailContent.style.display = 'none';
@@ -1260,7 +1286,10 @@
     async function runAllTests() {
       if (isRunningAll) return;
       isRunningAll = true;
+      stopRequested = false;
       btnRunAll.disabled = true;
+      btnStopAll.disabled = false;
+      btnStopAll.innerHTML = '<span>■</span> Stop';
       agentSelect.disabled = true;
       
       // Reset all cases to idle
@@ -1278,6 +1307,9 @@
 
       // Sequentially run
       for (let i = 0; i < testCases.length; i++) {
+        if (stopRequested) {
+          break;
+        }
         await new Promise((resolve) => {
           // Store completion listener
           window.onTestCaseComplete = () => {
@@ -1289,8 +1321,13 @@
       }
 
       isRunningAll = false;
+      stopRequested = false;
       btnRunAll.disabled = false;
+      btnStopAll.disabled = true;
+      btnStopAll.innerHTML = '<span>■</span> Stop';
       agentSelect.disabled = false;
+      updateStats();
+      renderTestCasesList();
     }
 
     function onTestFinished() {
