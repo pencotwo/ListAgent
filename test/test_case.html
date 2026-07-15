@@ -1016,6 +1016,28 @@
       });
     }
 
+    function getFullResultText(tc) {
+      if (tc.sessionData && tc.sessionData.exchanges) {
+        const responseEx = tc.sessionData.exchanges.slice().reverse().find(ex => ex.phase === 'response');
+        if (responseEx && responseEx.payload && responseEx.payload.body) {
+          const body = responseEx.payload.body;
+          // 1. LM Studio output array
+          if (Array.isArray(body.output)) {
+            const text = body.output
+              .filter(out => out && out.type === 'message' && out.content)
+              .map(out => out.content)
+              .join('\n');
+            if (text) return text;
+          }
+          // 2. OpenAI Choices structure
+          if (body.choices && body.choices[0] && body.choices[0].message && body.choices[0].message.content) {
+            return body.choices[0].message.content;
+          }
+        }
+      }
+      return tc.resultText;
+    }
+
     function selectTestCase(idx) {
       currentSelectedCaseIndex = idx;
       
@@ -1053,7 +1075,8 @@
         detailCaseStatus.innerText = tc.status.toUpperCase();
       }
 
-      detailCaseOutput.innerText = tc.resultText || (tc.status === 'running' ? 'Running agent...' : 'No execution output yet.');
+      const fullText = getFullResultText(tc);
+      detailCaseOutput.innerText = fullText || (tc.status === 'running' ? 'Running agent...' : 'No execution output yet.');
       if (tc.status === 'error' && tc.errorMsg) {
         detailCaseOutput.innerHTML += `\n\n<span style="color:var(--error); font-weight:bold;">Error details: ${escapeHtml(tc.errorMsg)}</span>`;
       }
@@ -1253,7 +1276,7 @@
     // Evaluate JavaScript verification expression
     function verifyCheckExpression(idx) {
       const tc = testCases[idx];
-      const resultText = tc.resultText;
+      const resultText = getFullResultText(tc);
       const sessionObj = tc.sessionData || { exchanges: [], logs: [] };
 
       try {
