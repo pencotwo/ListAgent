@@ -29,3 +29,6 @@ test/排程.txt
 test_result.xlsx
 fix_xlsx_dimension.py
 
+pull.bat
+push.bat
+release.bat
