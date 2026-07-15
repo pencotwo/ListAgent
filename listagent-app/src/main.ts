@@ -88,9 +88,9 @@ interface EventMapping {
   agentId: number
 }
 
-type ToolName = 'list_directory' | 'search_content' | 'read_file' | 'write_file' | 'replace_string' | 'trigger_event' | 'web_search' | 'fetch_url' | 'get_current_time' | 'execute_command'
+type ToolName = 'list_directory' | 'search_content' | 'grep_search' | 'read_file' | 'write_file' | 'replace_string' | 'trigger_event' | 'web_search' | 'fetch_url' | 'get_current_time' | 'execute_command'
 
-const TOOL_NAMES: ToolName[] = ['list_directory', 'search_content', 'read_file', 'write_file', 'replace_string', 'trigger_event', 'web_search', 'fetch_url', 'get_current_time', 'execute_command']
+const TOOL_NAMES: ToolName[] = ['list_directory', 'search_content', 'grep_search', 'read_file', 'write_file', 'replace_string', 'trigger_event', 'web_search', 'fetch_url', 'get_current_time', 'execute_command']
 
 interface AgentExecutionResult {
   endpoint: string

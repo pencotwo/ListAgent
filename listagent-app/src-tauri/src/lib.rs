@@ -822,10 +822,10 @@ fn tool_definitions(selected: &[String]) -> Result<Vec<Value>, String> {
     selected
         .iter()
         .map(|name| match name.as_str() {
-            "list_directory" => Ok(serde_json::json!({
+            "list_directory" | "list_dir" => Ok(serde_json::json!({
                 "type": "function",
                 "function": {
-                    "name": "list_directory",
+                    "name": name,
                     "description": "List files and directories inside a workspace directory.",
                     "parameters": {
                         "type": "object",
@@ -839,6 +839,23 @@ fn tool_definitions(selected: &[String]) -> Result<Vec<Value>, String> {
                 "function": {
                     "name": "search_content",
                     "description": "Recursively search UTF-8 file contents in the workspace. This searches inside files, not filenames. To locate or run a known script such as build.bat, prefer list_directory or execute_command.",
+                    "parameters": {
+                        "type": "object",
+                        "properties": {
+                            "path": { "type": "string", "description": "Workspace-relative file or directory path. Defaults to ." },
+                            "query": { "type": "string" },
+                            "case_sensitive": { "type": "boolean", "default": false }
+                        },
+                        "required": ["query"],
+                        "additionalProperties": false
+                    }
+                }
+            })),
+            "grep_search" => Ok(serde_json::json!({
+                "type": "function",
+                "function": {
+                    "name": "grep_search",
+                    "description": "Search file contents inside the workspace using a query string.",
                     "parameters": {
                         "type": "object",
                         "properties": {
@@ -1599,13 +1616,13 @@ fn execute_tool(
     arguments: &Value,
 ) -> Result<String, String> {
     match name {
-        "list_directory" => {
+        "list_directory" | "list_dir" => {
             let path = resolve_existing_tool_path(
                 root,
                 arguments.get("path").and_then(Value::as_str).unwrap_or("."),
             )?;
             if !path.is_dir() {
-                return Err("list_directory 的 path 不是目錄".to_string());
+                return Err(format!("{name} 的 path 不是目錄"));
             }
             let mut entries = Vec::new();
             for entry in fs::read_dir(&path)
@@ -1655,6 +1672,40 @@ fn execute_tool(
                 "truncated": state.truncated,
                 "warning": if state.truncated {
                     Some(format!("search_content stopped after scanning {} files, {}ms, or {} matches. This tool searches file contents, not filenames. For known scripts such as build.bat, call execute_command directly.", MAX_SEARCH_FILES, MAX_SEARCH_DURATION_MS, MAX_SEARCH_RESULTS))
+                } else {
+                    None
+                }
+            });
+            serde_json::to_string(&result).map_err(|error| error.to_string())
+        }
+        "grep_search" => {
+            let query = required_string(arguments, "query")?;
+            if query.is_empty() {
+                return Err("grep_search 的 query 不可為空".to_string());
+            }
+            let path = resolve_existing_tool_path(
+                root,
+                arguments.get("path").and_then(Value::as_str).unwrap_or("."),
+            )?;
+            let mut matches = Vec::new();
+            let mut state = SearchContentState::new();
+            search_file_content(
+                root,
+                &path,
+                query,
+                arguments
+                    .get("case_sensitive")
+                    .and_then(Value::as_bool)
+                    .unwrap_or(false),
+                &mut matches,
+                &mut state,
+            );
+            let result = serde_json::json!({
+                "matches": matches,
+                "files_scanned": state.files_scanned,
+                "truncated": state.truncated,
+                "warning": if state.truncated {
+                    Some(format!("grep_search stopped after scanning {} files, {}ms, or {} matches.", MAX_SEARCH_FILES, MAX_SEARCH_DURATION_MS, MAX_SEARCH_RESULTS))
                 } else {
                     None
                 }
@@ -2592,6 +2643,7 @@ async fn execute_agent_with_tools(
     const ALL_BUILTIN_TOOL_NAMES: &[&str] = &[
         "list_directory",
         "search_content",
+        "grep_search",
         "read_file",
         "write_file",
         "replace_string",
@@ -2890,6 +2942,9 @@ async fn execute_agent_with_tools(
                 "browse",
             ],
             "search_content" => &[
+                "grep", "find", "search", "text", "content", "code", "keyword",
+            ],
+            "grep_search" => &[
                 "grep", "find", "search", "text", "content", "code", "keyword",
             ],
             "read_file" => &["file", "read", "load", "open", "content", "text"],
