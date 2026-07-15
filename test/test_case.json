@@ -157,7 +157,7 @@
     "prompt": "歷史上是誰說過：『我思故我在』？",
     "tools": [],
     "model": "qwen2.5-coder-3b-instruct",
-    "check": "result.includes('笛卡兒') || result.includes('Descartes')"
+    "check": "result.includes('笛卡兒') || result.includes('笛卡尔') || result.includes('Descartes')"
   },
   {
     "id": 21,
