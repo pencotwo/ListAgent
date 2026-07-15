@@ -1,0 +1,1313 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>ListAgent Test Suite - Prompt & Tool Verification Dashboard</title>
+  <meta name="description" content="An interactive, real-time testing dashboard to execute and verify ListAgent prompt outputs and tool execution correctness.">
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700&family=Outfit:wght@400;500;600;700&family=Fira+Code:wght@400;500&display=swap" rel="stylesheet">
+  <style>
+    :root {
+      --bg: #090a0f;
+      --surface: #11131c;
+      --surface-card: #181b28;
+      --surface-card-hover: #1f2334;
+      --border: #2b3046;
+      --border-focus: #4f46e5;
+      --accent: #6366f1;
+      --accent-gradient: linear-gradient(135deg, #6366f1 0%, #a855f7 100%);
+      --text: #f3f4f6;
+      --text-muted: #9ca3af;
+      --success: #10b981;
+      --success-bg: rgba(16, 185, 129, 0.1);
+      --error: #ef4444;
+      --error-bg: rgba(239, 68, 68, 0.1);
+      --warning: #f59e0b;
+      --warning-bg: rgba(245, 158, 11, 0.1);
+      --info: #3b82f6;
+      --info-bg: rgba(59, 130, 246, 0.1);
+      --sans: 'Inter', system-ui, -apple-system, sans-serif;
+      --heading: 'Outfit', sans-serif;
+      --mono: 'Fira Code', 'Cascadia Code', Consolas, monospace;
+      --shadow: 0 4px 20px 0 rgba(0, 0, 0, 0.3);
+      --shadow-accent: 0 0 15px 2px rgba(99, 102, 241, 0.2);
+    }
+
+    * {
+      box-sizing: border-box;
+      margin: 0;
+      padding: 0;
+    }
+
+    body {
+      background-color: var(--bg);
+      color: var(--text);
+      font-family: var(--sans);
+      font-size: 14px;
+      line-height: 1.5;
+      min-height: 100vh;
+      background-image: 
+        radial-gradient(at 0% 0%, rgba(99, 102, 241, 0.08) 0px, transparent 50%),
+        radial-gradient(at 100% 100%, rgba(168, 85, 247, 0.05) 0px, transparent 50%);
+      background-attachment: fixed;
+      padding: 32px 24px;
+    }
+
+    h1, h2, h3 {
+      font-family: var(--heading);
+      font-weight: 600;
+    }
+
+    /* Container layout */
+    .app-container {
+      max-width: 1400px;
+      margin: 0 auto;
+      display: grid;
+      grid-template-columns: 1fr;
+      gap: 24px;
+    }
+
+    @media (min-width: 1024px) {
+      .app-container {
+        grid-template-columns: 1.2fr 0.8fr;
+      }
+    }
+
+    /* Header styling */
+    header {
+      grid-column: 1 / -1;
+      display: flex;
+      flex-direction: column;
+      justify-content: space-between;
+      align-items: flex-start;
+      gap: 16px;
+      padding-bottom: 8px;
+      border-bottom: 1px solid var(--border);
+      margin-bottom: 12px;
+    }
+
+    @media (min-width: 768px) {
+      header {
+        flex-direction: row;
+        align-items: center;
+      }
+    }
+
+    .title-area h1 {
+      font-size: 28px;
+      letter-spacing: -0.5px;
+      background: var(--accent-gradient);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+      margin-bottom: 4px;
+    }
+
+    .title-area p {
+      color: var(--text-muted);
+      font-size: 14px;
+    }
+
+    /* Connection banner */
+    .connection-status {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      font-family: var(--mono);
+      font-size: 12px;
+      background-color: var(--surface);
+      border: 1px solid var(--border);
+      padding: 6px 14px;
+      border-radius: 9999px;
+    }
+
+    .status-dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background-color: var(--text-muted);
+    }
+    .status-dot.online {
+      background-color: var(--success);
+      box-shadow: 0 0 8px var(--success);
+    }
+    .status-dot.offline {
+      background-color: var(--error);
+      box-shadow: 0 0 8px var(--error);
+    }
+
+    /* Controls Panel */
+    .control-card {
+      background-color: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 20px;
+      box-shadow: var(--shadow);
+      display: flex;
+      flex-wrap: wrap;
+      gap: 16px;
+      align-items: flex-end;
+      grid-column: 1 / -1;
+    }
+
+    .form-group {
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+      flex: 1;
+      min-width: 240px;
+    }
+
+    .form-group label {
+      font-size: 11px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.8px;
+      color: var(--text-muted);
+    }
+
+    .form-select, .form-input {
+      background-color: var(--bg);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      color: var(--text);
+      font-family: var(--sans);
+      font-size: 14px;
+      padding: 10px 14px;
+      outline: none;
+      width: 100%;
+      transition: all 0.2s ease;
+    }
+
+    .form-select:focus, .form-input:focus {
+      border-color: var(--border-focus);
+      box-shadow: 0 0 0 2px rgba(99, 102, 241, 0.15);
+    }
+
+    .btn {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      gap: 8px;
+      padding: 10px 20px;
+      border-radius: 8px;
+      font-family: var(--sans);
+      font-size: 14px;
+      font-weight: 600;
+      cursor: pointer;
+      border: none;
+      transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+      white-space: nowrap;
+      height: 42px;
+    }
+
+    .btn-primary {
+      background: var(--accent-gradient);
+      color: white;
+      box-shadow: var(--shadow-accent);
+    }
+    .btn-primary:hover:not(:disabled) {
+      transform: translateY(-1px);
+      box-shadow: 0 0 20px 4px rgba(99, 102, 241, 0.35);
+    }
+    .btn-primary:active:not(:disabled) {
+      transform: translateY(0);
+    }
+
+    .btn-secondary {
+      background-color: transparent;
+      border: 1px solid var(--border);
+      color: var(--text);
+    }
+    .btn-secondary:hover:not(:disabled) {
+      background-color: var(--surface-card);
+      border-color: var(--text-muted);
+    }
+
+    .btn:disabled {
+      opacity: 0.5;
+      cursor: not-allowed;
+      transform: none !important;
+      box-shadow: none !important;
+    }
+
+    /* Test Case list card */
+    .main-panel {
+      background-color: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 16px;
+      padding: 24px;
+      box-shadow: var(--shadow);
+      display: flex;
+      flex-direction: column;
+      gap: 20px;
+    }
+
+    .panel-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+    }
+
+    .panel-header h2 {
+      font-size: 20px;
+    }
+
+    /* Test case items */
+    .test-list {
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+    }
+
+    .test-item {
+      background-color: var(--surface-card);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 16px;
+      transition: all 0.2s ease;
+      cursor: pointer;
+      display: flex;
+      flex-direction: column;
+      gap: 12px;
+    }
+
+    .test-item:hover {
+      background-color: var(--surface-card-hover);
+      border-color: var(--text-muted);
+      transform: translateX(2px);
+    }
+
+    .test-item.active {
+      border-color: var(--accent);
+      box-shadow: 0 0 10px rgba(99, 102, 241, 0.15);
+    }
+
+    .test-summary-row {
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-start;
+      gap: 12px;
+    }
+
+    .test-title-container {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+
+    .test-id {
+      font-family: var(--mono);
+      font-size: 11px;
+      background-color: var(--border);
+      color: var(--text-muted);
+      padding: 2px 6px;
+      border-radius: 4px;
+    }
+
+    .test-name {
+      font-weight: 600;
+      font-size: 15px;
+    }
+
+    .test-prompt-preview {
+      color: var(--text-muted);
+      font-size: 13px;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      max-width: 500px;
+    }
+
+    .test-status-badge {
+      font-size: 11px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+      padding: 3px 8px;
+      border-radius: 6px;
+      font-family: var(--mono);
+    }
+
+    .status-idle {
+      background-color: var(--border);
+      color: var(--text-muted);
+    }
+    .status-running {
+      background-color: var(--info-bg);
+      color: var(--info);
+      animation: pulse 1.5s infinite alternate;
+    }
+    .status-success {
+      background-color: var(--success-bg);
+      color: var(--success);
+    }
+    .status-error {
+      background-color: var(--error-bg);
+      color: var(--error);
+    }
+
+    @keyframes pulse {
+      from { opacity: 0.6; }
+      to { opacity: 1; }
+    }
+
+    /* Right column: Editor and Details */
+    .sidebar-panel {
+      display: flex;
+      flex-direction: column;
+      gap: 24px;
+    }
+
+    .sidebar-card {
+      background-color: var(--surface);
+      border: 1px solid var(--border);
+      border-radius: 16px;
+      padding: 24px;
+      box-shadow: var(--shadow);
+    }
+
+    .sidebar-card h3 {
+      font-size: 18px;
+      margin-bottom: 16px;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    /* File upload box */
+    .file-dropzone {
+      border: 2px dashed var(--border);
+      border-radius: 10px;
+      padding: 20px;
+      text-align: center;
+      cursor: pointer;
+      transition: all 0.2s ease;
+      background-color: rgba(255, 255, 255, 0.01);
+      margin-bottom: 16px;
+    }
+    .file-dropzone:hover {
+      border-color: var(--accent);
+      background-color: rgba(99, 102, 241, 0.02);
+    }
+    .file-dropzone p {
+      font-size: 13px;
+      color: var(--text-muted);
+      margin-top: 6px;
+    }
+    .file-dropzone input {
+      display: none;
+    }
+
+    /* JSON Editor */
+    .json-editor-textarea {
+      width: 100%;
+      height: 220px;
+      background-color: var(--bg);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      color: var(--text);
+      font-family: var(--mono);
+      font-size: 12px;
+      padding: 12px;
+      resize: vertical;
+      outline: none;
+      line-height: 1.5;
+    }
+    .json-editor-textarea:focus {
+      border-color: var(--border-focus);
+    }
+
+    /* Execution Log Detail */
+    .detail-container {
+      display: flex;
+      flex-direction: column;
+      gap: 16px;
+    }
+
+    .detail-section {
+      background-color: var(--bg);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 14px;
+    }
+
+    .detail-label {
+      font-size: 11px;
+      font-weight: 700;
+      color: var(--text-muted);
+      text-transform: uppercase;
+      letter-spacing: 0.6px;
+      margin-bottom: 6px;
+    }
+
+    .detail-value {
+      font-size: 13px;
+      word-break: break-all;
+    }
+
+    .detail-value.mono {
+      font-family: var(--mono);
+      font-size: 12px;
+      white-space: pre-wrap;
+      max-height: 200px;
+      overflow-y: auto;
+    }
+
+    .detail-log-list {
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+      max-height: 150px;
+      overflow-y: auto;
+    }
+
+    .detail-log-item {
+      font-family: var(--mono);
+      font-size: 11px;
+      padding: 4px 6px;
+      border-radius: 4px;
+      border-left: 2px solid var(--border);
+    }
+
+    .detail-log-item.info { border-left-color: var(--info); color: #93c5fd; }
+    .detail-log-item.success { border-left-color: var(--success); color: #a7f3d0; }
+    .detail-log-item.warn { border-left-color: var(--warning); color: #fde68a; }
+    .detail-log-item.error { border-left-color: var(--error); color: #fca5a5; }
+    .detail-log-item.system { border-left-color: var(--text-muted); color: var(--text-muted); }
+
+    /* Progress bar */
+    .progress-bar-container {
+      width: 100%;
+      height: 8px;
+      background-color: var(--border);
+      border-radius: 9999px;
+      overflow: hidden;
+      margin-top: 10px;
+    }
+
+    .progress-bar-fill {
+      height: 100%;
+      background: var(--accent-gradient);
+      width: 0%;
+      transition: width 0.3s ease;
+    }
+
+    /* Stats Summary Grid */
+    .stats-summary {
+      display: grid;
+      grid-template-columns: repeat(4, 1fr);
+      gap: 10px;
+      margin-top: 4px;
+    }
+
+    .stat-box {
+      background-color: var(--surface-card);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 8px 12px;
+      text-align: center;
+    }
+
+    .stat-number {
+      font-family: var(--heading);
+      font-size: 18px;
+      font-weight: 700;
+    }
+
+    .stat-label {
+      font-size: 10px;
+      color: var(--text-muted);
+      text-transform: uppercase;
+    }
+
+    /* Running spinners */
+    .spinner {
+      display: inline-block;
+      width: 12px;
+      height: 12px;
+      border: 2px solid rgba(255, 255, 255, 0.1);
+      border-top-color: currentColor;
+      border-radius: 50%;
+      animation: spin 0.8s linear infinite;
+    }
+
+    @keyframes spin {
+      to { transform: rotate(360deg); }
+    }
+  </style>
+</head>
+<body>
+
+  <div class="app-container">
+    <header>
+      <div class="title-area">
+        <h1>ListAgent Test Suite</h1>
+        <p>Prompt & Tool verification client for ListAgent desktop automation</p>
+      </div>
+      <div class="connection-status" id="connection-indicator">
+        <span class="status-dot offline" id="connection-dot"></span>
+        <span id="connection-text">ListAgent Server: Checking...</span>
+      </div>
+    </header>
+
+    <!-- Controls / Configurations -->
+    <div class="control-card">
+      <div class="form-group">
+        <label for="agent-select">Select Agent to Test</label>
+        <select id="agent-select" class="form-select">
+          <option value="">-- Fetching agents from app... --</option>
+        </select>
+      </div>
+      <button class="btn btn-secondary" id="btn-refresh-agents">
+        <span>🔄</span> Refresh Agents
+      </button>
+      <button class="btn btn-primary" id="btn-run-all" disabled>
+        <span>▶</span> Run All Tests
+      </button>
+    </div>
+
+    <!-- Left column: Test cases list -->
+    <div class="main-panel">
+      <div class="panel-header">
+        <h2>Test Cases</h2>
+        <span class="test-status-badge status-idle" id="summary-badge">READY</span>
+      </div>
+
+      <div class="stats-summary-card">
+        <div class="progress-bar-container">
+          <div class="progress-bar-fill" id="test-progress-bar"></div>
+        </div>
+        <div class="stats-summary">
+          <div class="stat-box">
+            <div class="stat-number" id="stat-total">0</div>
+            <div class="stat-label">Total</div>
+          </div>
+          <div class="stat-box">
+            <div class="stat-number" id="stat-passed" style="color:var(--success)">0</div>
+            <div class="stat-label">Passed</div>
+          </div>
+          <div class="stat-box">
+            <div class="stat-number" id="stat-failed" style="color:var(--error)">0</div>
+            <div class="stat-label">Failed</div>
+          </div>
+          <div class="stat-box">
+            <div class="stat-number" id="stat-pending" style="color:var(--warning)">0</div>
+            <div class="stat-label">Pending</div>
+          </div>
+        </div>
+      </div>
+
+      <div class="test-list" id="test-cases-list">
+        <!-- Dynmically rendered test cases -->
+        <div style="color:var(--text-muted); text-align:center; padding: 40px 0;">
+          <p>Please load your <strong>test_case.json</strong> to get started.</p>
+        </div>
+      </div>
+    </div>
+
+    <!-- Right column: Test detail & JSON Editor -->
+    <div class="sidebar-panel">
+      <div class="sidebar-card">
+        <h3><span>📝</span> JSON Config</h3>
+        <div class="file-dropzone" id="dropzone" onclick="document.getElementById('file-input').click()">
+          <span>📂</span>
+          <p>Click to select or drag test_case.json here</p>
+          <input type="file" id="file-input" accept=".json">
+        </div>
+        <textarea class="json-editor-textarea" id="json-editor" placeholder="[{ 'name': 'Test', 'prompt': '...', 'check': '...' }]"></textarea>
+        <button class="btn btn-secondary" id="btn-editor-apply" style="width: 100%; margin-top: 12px;">
+          Apply JSON Changes
+        </button>
+      </div>
+
+      <div class="sidebar-card">
+        <h3><span>🔍</span> Test Execution Detail</h3>
+        <div id="test-detail-placeholder" style="color:var(--text-muted); text-align:center; padding: 20px 0;">
+          Select a test case to view execution detail & logs.
+        </div>
+        <div id="test-detail-content" class="detail-container" style="display: none;">
+          <div class="detail-section">
+            <div class="detail-label">Test Case</div>
+            <div class="detail-value" id="detail-case-name" style="font-weight: 600;">-</div>
+          </div>
+          <div class="detail-section">
+            <div class="detail-label">Prompt</div>
+            <div class="detail-value" id="detail-case-prompt">-</div>
+          </div>
+          <div class="detail-section">
+            <div class="detail-label">Required Tools</div>
+            <div class="detail-value mono" id="detail-case-tools">-</div>
+          </div>
+          <div class="detail-section">
+            <div class="detail-label">Model Override</div>
+            <div class="detail-value mono" id="detail-case-model">-</div>
+          </div>
+          <div class="detail-section">
+            <div class="detail-label">Request URL (GET Equivalent)</div>
+            <div class="detail-value" style="word-break: break-all;">
+              <a href="#" id="detail-case-url" target="_blank" style="color:var(--accent); text-decoration: underline; font-family:var(--mono); font-size:12px;">-</a>
+            </div>
+          </div>
+          <div class="detail-section">
+            <div class="detail-label">Execution ID & Status</div>
+            <div class="detail-value" id="detail-case-status">-</div>
+          </div>
+          <div class="detail-section">
+            <div class="detail-label">Agent Response (Preview)</div>
+            <div class="detail-value mono" id="detail-case-output">No response received yet.</div>
+          </div>
+          <div class="detail-section">
+            <div class="detail-label">Verification Condition</div>
+            <div class="detail-value mono" id="detail-case-check">-</div>
+          </div>
+          <div class="detail-section">
+            <div class="detail-label">Assertion Status</div>
+            <div class="detail-value" id="detail-case-assert">-</div>
+          </div>
+          <div class="detail-section" id="detail-session-sec" style="display:none;">
+            <div class="detail-label">Execution Session</div>
+            <div class="detail-value">
+              <a href="#" id="detail-session-link" target="_blank" style="color:var(--accent); text-decoration: underline;">📄 View full session JSON</a>
+            </div>
+          </div>
+          <div class="detail-section" id="detail-logs-sec" style="display:none;">
+            <div class="detail-label">App Logs</div>
+            <div class="detail-log-list" id="detail-logs-list"></div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <script>
+    const API_BASE = 'http://127.0.0.1:37123';
+    
+    // Application state
+    let agents = [];
+    let testCases = [];
+    let currentSelectedCaseIndex = null;
+    let isRunningAll = false;
+    let isServerOnline = false;
+
+    // DOM Elements
+    const agentSelect = document.getElementById('agent-select');
+    const btnRefreshAgents = document.getElementById('btn-refresh-agents');
+    const btnRunAll = document.getElementById('btn-run-all');
+    const testCasesList = document.getElementById('test-cases-list');
+    const fileInput = document.getElementById('file-input');
+    const jsonEditor = document.getElementById('json-editor');
+    const btnEditorApply = document.getElementById('btn-editor-apply');
+    const dropzone = document.getElementById('dropzone');
+    const connectionDot = document.getElementById('connection-dot');
+    const connectionText = document.getElementById('connection-text');
+    
+    // Stats elements
+    const statTotal = document.getElementById('stat-total');
+    const statPassed = document.getElementById('stat-passed');
+    const statFailed = document.getElementById('stat-failed');
+    const statPending = document.getElementById('stat-pending');
+    const testProgressBar = document.getElementById('test-progress-bar');
+    const summaryBadge = document.getElementById('summary-badge');
+
+    // Detail elements
+    const testDetailPlaceholder = document.getElementById('test-detail-placeholder');
+    const testDetailContent = document.getElementById('test-detail-content');
+    const detailCaseName = document.getElementById('detail-case-name');
+    const detailCasePrompt = document.getElementById('detail-case-prompt');
+    const detailCaseTools = document.getElementById('detail-case-tools');
+    const detailCaseModel = document.getElementById('detail-case-model');
+    const detailCaseUrl = document.getElementById('detail-case-url');
+    const detailCaseStatus = document.getElementById('detail-case-status');
+    const detailCaseOutput = document.getElementById('detail-case-output');
+    const detailCaseCheck = document.getElementById('detail-case-check');
+    const detailCaseAssert = document.getElementById('detail-case-assert');
+    const detailSessionSec = document.getElementById('detail-session-sec');
+    const detailSessionLink = document.getElementById('detail-session-link');
+    const detailLogsSec = document.getElementById('detail-logs-sec');
+    const detailLogsList = document.getElementById('detail-logs-list');
+
+    // Init
+    window.addEventListener('DOMContentLoaded', () => {
+      checkServerHealth();
+      setInterval(checkServerHealth, 5000); // Check server health every 5s
+
+      // Try automatic load from server root first
+      autoLoadTestCases();
+
+      // Setup Listeners
+      btnRefreshAgents.addEventListener('click', fetchAgents);
+      btnRunAll.addEventListener('click', runAllTests);
+      btnEditorApply.addEventListener('click', applyEditorJson);
+      agentSelect.addEventListener('change', () => {
+        if (currentSelectedCaseIndex !== null) {
+          selectTestCase(currentSelectedCaseIndex);
+        }
+      });
+      
+      // File selector and drag & drop setup
+      fileInput.addEventListener('change', handleFileSelect);
+      dropzone.addEventListener('dragover', (e) => {
+        e.preventDefault();
+        dropzone.style.borderColor = 'var(--accent)';
+      });
+      dropzone.addEventListener('dragleave', () => {
+        dropzone.style.borderColor = 'var(--border)';
+      });
+      dropzone.addEventListener('drop', (e) => {
+        e.preventDefault();
+        dropzone.style.borderColor = 'var(--border)';
+        if (e.dataTransfer.files.length > 0) {
+          const file = e.dataTransfer.files[0];
+          readJsonFile(file);
+        }
+      });
+    });
+
+    // Server health checking
+    async function checkServerHealth() {
+      try {
+        const response = await fetch(`${API_BASE}/health`, { method: 'GET' });
+        if (response.ok) {
+          if (!isServerOnline) {
+            isServerOnline = true;
+            connectionDot.className = 'status-dot online';
+            connectionText.innerText = 'ListAgent Server: Online';
+            fetchAgents();
+          }
+        } else {
+          setServerOffline();
+        }
+      } catch (err) {
+        setServerOffline();
+      }
+    }
+
+    function setServerOffline() {
+      isServerOnline = false;
+      connectionDot.className = 'status-dot offline';
+      connectionText.innerText = 'ListAgent Server: Offline';
+      agentSelect.innerHTML = '<option value="">-- Start ListAgent.exe first --</option>';
+      btnRunAll.disabled = true;
+    }
+
+    // Fetch active agents
+    async function fetchAgents() {
+      if (!isServerOnline) return;
+      try {
+        const response = await fetch(`${API_BASE}/input?action=list_agents`);
+        const data = await response.json();
+        agents = data.agents || [];
+        
+        // Filter agents that allow HTTP request
+        const httpAgents = agents.filter(a => a.allowHttp);
+        
+        if (httpAgents.length === 0) {
+          agentSelect.innerHTML = '<option value="">-- No Agents allow HTTP (enable it in settings) --</option>';
+          btnRunAll.disabled = true;
+          return;
+        }
+
+        agentSelect.innerHTML = '';
+        httpAgents.forEach(agent => {
+          const opt = document.createElement('option');
+          opt.value = agent.agentId;
+          opt.innerText = `${agent.name} (${agent.agentId})`;
+          agentSelect.appendChild(opt);
+        });
+
+        if (testCases.length > 0) {
+          btnRunAll.disabled = false;
+        }
+      } catch (err) {
+        console.error('Fetch agents failed', err);
+      }
+    }
+
+    // Auto-load test_case.json
+    async function autoLoadTestCases() {
+      try {
+        const response = await fetch('test_case.json');
+        if (response.ok) {
+          const text = await response.text();
+          jsonEditor.value = text;
+          testCases = JSON.parse(text);
+          initializeTestCases();
+        }
+      } catch (e) {
+        console.log('Unable to auto-fetch test_case.json, requiring user to upload manually.', e);
+      }
+    }
+
+    function handleFileSelect(e) {
+      if (e.target.files.length > 0) {
+        readJsonFile(e.target.files[0]);
+      }
+    }
+
+    function readJsonFile(file) {
+      const reader = new FileReader();
+      reader.onload = (event) => {
+        try {
+          const content = event.target.result;
+          jsonEditor.value = content;
+          testCases = JSON.parse(content);
+          initializeTestCases();
+        } catch (err) {
+          alert('Invalid JSON file format: ' + err.message);
+        }
+      };
+      reader.readAsText(file);
+    }
+
+    function applyEditorJson() {
+      try {
+        testCases = JSON.parse(jsonEditor.value);
+        initializeTestCases();
+      } catch (err) {
+        alert('JSON syntax error: ' + err.message);
+      }
+    }
+
+    // Setup loaded test cases
+    function initializeTestCases() {
+      testCases = testCases.map((tc, index) => ({
+        id: tc.id || index + 1,
+        name: tc.name || `Test Case #${index + 1}`,
+        prompt: tc.prompt || '',
+        tools: tc.tools || [],
+        model: tc.model || '',
+        check: tc.check || 'true',
+        status: 'idle', // idle, running, success, error
+        resultText: '',
+        sessionData: null,
+        execId: '',
+        logs: [],
+        errorMsg: ''
+      }));
+
+      updateStats();
+      renderTestCasesList();
+      if (isServerOnline && agents.some(a => a.allowHttp)) {
+        btnRunAll.disabled = false;
+      }
+      currentSelectedCaseIndex = null;
+      testDetailPlaceholder.style.display = 'block';
+      testDetailContent.style.display = 'none';
+    }
+
+    function updateStats() {
+      const total = testCases.length;
+      const passed = testCases.filter(t => t.status === 'success').length;
+      const failed = testCases.filter(t => t.status === 'error').length;
+      const running = testCases.filter(t => t.status === 'running').length;
+      const pending = total - (passed + failed + running);
+
+      statTotal.innerText = total;
+      statPassed.innerText = passed;
+      statFailed.innerText = failed;
+      statPending.innerText = pending;
+
+      if (total > 0) {
+        const percent = ((passed + failed) / total) * 100;
+        testProgressBar.style.width = `${percent}%`;
+      } else {
+        testProgressBar.style.width = '0%';
+      }
+
+      if (running > 0) {
+        summaryBadge.innerText = 'RUNNING';
+        summaryBadge.className = 'test-status-badge status-running';
+      } else if (failed > 0) {
+        summaryBadge.innerText = 'FAILED';
+        summaryBadge.className = 'test-status-badge status-error';
+      } else if (passed === total && total > 0) {
+        summaryBadge.innerText = 'PASSED';
+        summaryBadge.className = 'test-status-badge status-success';
+      } else {
+        summaryBadge.innerText = 'READY';
+        summaryBadge.className = 'test-status-badge status-idle';
+      }
+    }
+
+    // Render left panel test items
+    function renderTestCasesList() {
+      testCasesList.innerHTML = '';
+      if (testCases.length === 0) {
+        testCasesList.innerHTML = '<div style="color:var(--text-muted); text-align:center; padding: 40px 0;">No test cases loaded.</div>';
+        return;
+      }
+
+      testCases.forEach((tc, idx) => {
+        const item = document.createElement('div');
+        item.className = `test-item ${currentSelectedCaseIndex === idx ? 'active' : ''}`;
+        item.dataset.index = idx;
+        
+        let statusClass = 'status-idle';
+        let statusText = 'READY';
+        if (tc.status === 'running') {
+          statusClass = 'status-running';
+          statusText = 'RUNNING';
+        } else if (tc.status === 'success') {
+          statusClass = 'status-success';
+          statusText = 'PASSED';
+        } else if (tc.status === 'error') {
+          statusClass = 'status-error';
+          statusText = 'FAILED';
+        }
+
+        item.innerHTML = `
+          <div class="test-summary-row">
+            <div class="test-title-container">
+              <span class="test-id">#${tc.id}</span>
+              <span class="test-name">${escapeHtml(tc.name)}</span>
+            </div>
+            <span class="test-status-badge ${statusClass}" id="badge-${idx}">${statusText}</span>
+          </div>
+          <div class="test-summary-row" style="margin-top: 4px;">
+            <div class="test-prompt-preview">${escapeHtml(tc.prompt)}</div>
+            <button class="btn btn-secondary btn-run-single" style="height: 28px; padding: 0 10px; font-size: 11px;" id="btn-run-${idx}">
+              ${tc.status === 'running' ? '<span class="spinner"></span>' : '▶ Run'}
+            </button>
+          </div>
+        `;
+
+        item.addEventListener('click', (e) => {
+          // Prevent triggered run from selecting row if click on Run button
+          if (e.target.closest('.btn-run-single')) return;
+          selectTestCase(idx);
+        });
+
+        const runBtn = item.querySelector('.btn-run-single');
+        runBtn.addEventListener('click', () => {
+          if (tc.status !== 'running') {
+            runSingleTest(idx);
+          }
+        });
+
+        testCasesList.appendChild(item);
+      });
+    }
+
+    function selectTestCase(idx) {
+      currentSelectedCaseIndex = idx;
+      
+      // Update highlights
+      document.querySelectorAll('.test-item').forEach((item, index) => {
+        if (index === idx) item.classList.add('active');
+        else item.classList.remove('active');
+      });
+
+      testDetailPlaceholder.style.display = 'none';
+      testDetailContent.style.display = 'block';
+
+      const tc = testCases[idx];
+      detailCaseName.innerText = `[#${tc.id}] ${tc.name}`;
+      detailCasePrompt.innerText = tc.prompt;
+      detailCaseTools.innerText = tc.tools && tc.tools.length > 0 ? tc.tools.join(', ') : '(None)';
+      detailCaseModel.innerText = tc.model || '(Default Agent Model)';
+
+      const agentId = agentSelect.value || '<agent_id>';
+      const tempExecId = tc.execId || 'tc_temp';
+      const toolsStr = tc.tools && tc.tools.length > 0 ? encodeURIComponent(tc.tools.join(',')) : '';
+      const modelStr = tc.model ? encodeURIComponent(tc.model) : '';
+      const messageStr = encodeURIComponent(tc.prompt);
+      let requestUrl = `${API_BASE}/input?agent_id=${encodeURIComponent(agentId)}&action=run&exec_id=${tempExecId}`;
+      if (toolsStr) requestUrl += `&tools=${toolsStr}`;
+      if (modelStr) requestUrl += `&model=${modelStr}`;
+      if (messageStr) requestUrl += `&message=${messageStr}`;
+
+      detailCaseUrl.innerText = requestUrl;
+      detailCaseUrl.href = requestUrl;
+      
+      if (tc.execId) {
+        detailCaseStatus.innerHTML = `Exec ID: <span style="font-family:var(--mono); color:var(--accent); font-weight:500;">${tc.execId}</span> (${tc.status.toUpperCase()})`;
+      } else {
+        detailCaseStatus.innerText = tc.status.toUpperCase();
+      }
+
+      detailCaseOutput.innerText = tc.resultText || (tc.status === 'running' ? 'Running agent...' : 'No execution output yet.');
+      if (tc.status === 'error' && tc.errorMsg) {
+        detailCaseOutput.innerHTML += `\n\n<span style="color:var(--error); font-weight:bold;">Error details: ${escapeHtml(tc.errorMsg)}</span>`;
+      }
+      
+      detailCaseCheck.innerText = tc.check;
+      
+      if (tc.status === 'success') {
+        detailCaseAssert.innerHTML = `<span style="color:var(--success); font-weight:600;">✓ PASSED</span> (Condition evaluated to true)`;
+      } else if (tc.status === 'error') {
+        detailCaseAssert.innerHTML = `<span style="color:var(--error); font-weight:600;">✗ FAILED</span> (Condition evaluated to false, or execution error)`;
+      } else if (tc.status === 'running') {
+        detailCaseAssert.innerHTML = `<span style="color:var(--info); font-weight:600;">ℹ RUNNING</span> (Waiting for verification)`;
+      } else {
+        detailCaseAssert.innerText = 'PENDING';
+      }
+
+      // Session Link
+      if (tc.sessionData && tc.sessionData.lastSessionUrl) {
+        detailSessionSec.style.display = 'block';
+        detailSessionLink.href = tc.sessionData.lastSessionUrl;
+      } else if (tc.sessionData && tc.sessionData.sessionUrl) {
+        detailSessionSec.style.display = 'block';
+        detailSessionLink.href = tc.sessionData.sessionUrl;
+      } else {
+        detailSessionSec.style.display = 'none';
+      }
+
+      // App Logs
+      if (tc.logs && tc.logs.length > 0) {
+        detailLogsSec.style.display = 'block';
+        detailLogsList.innerHTML = '';
+        tc.logs.forEach(log => {
+          const item = document.createElement('div');
+          item.className = `detail-log-item ${log.level}`;
+          const time = new Date(log.timestamp).toLocaleTimeString('zh-TW', { hour12: false });
+          item.innerText = `[${time}] ${log.message}`;
+          detailLogsList.appendChild(item);
+        });
+      } else {
+        detailLogsSec.style.display = 'none';
+      }
+    }
+
+    // Run a single test case
+    async function runSingleTest(idx) {
+      if (!isServerOnline) {
+        alert('Server is offline. Start ListAgent.exe first!');
+        onTestFinished();
+        return;
+      }
+      const agentId = agentSelect.value;
+      if (!agentId) {
+        alert('Please select an Agent first.');
+        onTestFinished();
+        return;
+      }
+
+      const tc = testCases[idx];
+      tc.status = 'running';
+      tc.resultText = '';
+      tc.sessionData = null;
+      tc.logs = [];
+      tc.errorMsg = '';
+      
+      const execId = 'tc_' + Date.now().toString(36) + '_' + Math.random().toString(36).slice(2, 6);
+      tc.execId = execId;
+
+      renderTestCasesList();
+      updateStats();
+      if (currentSelectedCaseIndex === idx) selectTestCase(idx);
+
+      try {
+        // Send POST input run request
+        const runRes = await fetch(`${API_BASE}/input`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            agent_id: agentId,
+            action: 'run',
+            exec_id: execId,
+            tools: tc.tools || [],
+            model: tc.model || '',
+            parameters: {
+              message: tc.prompt
+            }
+          })
+        });
+
+        if (!runRes.ok) {
+          throw new Error(`Server returned HTTP ${runRes.status}`);
+        }
+
+        // Start polling for completion
+        pollTestStatus(idx, agentId, execId);
+      } catch (err) {
+        tc.status = 'error';
+        tc.errorMsg = err.message;
+        tc.resultText = `Failed to trigger execution: ${err.message}`;
+        renderTestCasesList();
+        updateStats();
+        if (currentSelectedCaseIndex === idx) selectTestCase(idx);
+        onTestFinished();
+      }
+    }
+
+    // Poll status of executing agent
+    function pollTestStatus(idx, agentId, execId) {
+      const tc = testCases[idx];
+      const maxAttempts = 120; // 2 minutes timeout
+      let attempts = 0;
+
+      const interval = setInterval(async () => {
+        attempts++;
+        if (attempts > maxAttempts) {
+          clearInterval(interval);
+          tc.status = 'error';
+          tc.errorMsg = 'Timeout: Agent execution exceeded 2 minutes';
+          tc.resultText = 'Polling timeout.';
+          renderTestCasesList();
+          updateStats();
+          if (currentSelectedCaseIndex === idx) selectTestCase(idx);
+          onTestFinished();
+          return;
+        }
+
+        try {
+          const statusRes = await fetch(`${API_BASE}/input?action=get_status&agent_id=${agentId}`);
+          if (!statusRes.ok) return; // Ignore transient connection errors
+
+          const statusData = await statusRes.json();
+          const detail = statusData.detail || {};
+
+          // Check if finished
+          const isFinished = !statusData.running && detail.lastExecId === execId;
+          const isCurrentlyRunning = statusData.running && detail.currentExecId === execId;
+
+          if (isCurrentlyRunning) {
+            tc.status = 'running';
+            // Update live output preview if any
+            if (detail.currentRound) {
+              tc.resultText = `Running... Round ${detail.currentRound}. Tokens: ${detail.currentTokens || 0}`;
+              if (currentSelectedCaseIndex === idx) {
+                detailCaseOutput.innerText = tc.resultText;
+              }
+            }
+          }
+
+          if (isFinished) {
+            clearInterval(interval);
+            
+            // Gather result details
+            tc.resultText = detail.lastContentPreview || '';
+            const isSuccessRun = detail.lastSuccess !== false;
+            
+            // Store session metadata
+            tc.sessionData = {
+              lastSessionUrl: detail.lastSessionUrl,
+              lastSessionPath: detail.lastSessionPath,
+              lastTokens: detail.lastTokens,
+              lastRounds: detail.lastRounds
+            };
+
+            // Attempt to load full session file to get exchanges & logs
+            if (detail.lastSessionUrl) {
+              try {
+                const sessionRes = await fetch(detail.lastSessionUrl);
+                if (sessionRes.ok) {
+                  const fullSession = await sessionRes.json();
+                  tc.sessionData = fullSession;
+                  tc.logs = fullSession.logs || [];
+                }
+              } catch (e) {
+                console.error('Failed to load session details', e);
+              }
+            }
+
+            // If the agent execution itself failed
+            if (!isSuccessRun) {
+              tc.status = 'error';
+              tc.errorMsg = 'Agent aborted or run execution failed internally';
+            } else {
+              // Run the assertion check
+              verifyCheckExpression(idx);
+            }
+
+            renderTestCasesList();
+            updateStats();
+            if (currentSelectedCaseIndex === idx) selectTestCase(idx);
+            onTestFinished();
+          }
+        } catch (err) {
+          console.error('Polling error', err);
+        }
+      }, 1000);
+    }
+
+    // Evaluate JavaScript verification expression
+    function verifyCheckExpression(idx) {
+      const tc = testCases[idx];
+      const resultText = tc.resultText;
+      const sessionObj = tc.sessionData || { exchanges: [], logs: [] };
+
+      try {
+        // Quick syntax helper: if check starts with "contains:", do case-insensitive substring
+        let expression = tc.check.trim();
+        let passed = false;
+
+        if (expression.startsWith('contains:')) {
+          const matchStr = expression.substring(9).trim();
+          passed = resultText.toLowerCase().includes(matchStr.toLowerCase());
+        } else {
+          // Construct function with result & session variables
+          const checkFn = new Function('result', 'session', `return (${expression});`);
+          passed = !!checkFn(resultText, sessionObj);
+        }
+
+        if (passed) {
+          tc.status = 'success';
+        } else {
+          tc.status = 'error';
+          tc.errorMsg = 'Assertion failed: check expression evaluated to false.';
+        }
+      } catch (err) {
+        tc.status = 'error';
+        tc.errorMsg = `Assertion check syntax error: ${err.message}`;
+      }
+    }
+
+    // Run all tests sequentially
+    async function runAllTests() {
+      if (isRunningAll) return;
+      isRunningAll = true;
+      btnRunAll.disabled = true;
+      agentSelect.disabled = true;
+      
+      // Reset all cases to idle
+      testCases.forEach(tc => {
+        tc.status = 'idle';
+        tc.resultText = '';
+        tc.sessionData = null;
+        tc.execId = '';
+        tc.logs = [];
+        tc.errorMsg = '';
+      });
+      
+      renderTestCasesList();
+      updateStats();
+
+      // Sequentially run
+      for (let i = 0; i < testCases.length; i++) {
+        await new Promise((resolve) => {
+          // Store completion listener
+          window.onTestCaseComplete = () => {
+            window.onTestCaseComplete = null;
+            resolve();
+          };
+          runSingleTest(i);
+        });
+      }
+
+      isRunningAll = false;
+      btnRunAll.disabled = false;
+      agentSelect.disabled = false;
+    }
+
+    function onTestFinished() {
+      if (isRunningAll && typeof window.onTestCaseComplete === 'function') {
+        window.onTestCaseComplete();
+      }
+    }
+
+    // Utilities
+    function escapeHtml(s) {
+      return String(s)
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;')
+        .replace(/"/g, '&quot;')
+        .replace(/'/g, '&#039;');
+    }
+  </script>
+</body>
+</html>

@@ -1,0 +1,34 @@
+[
+  {
+    "id": 1,
+    "name": "基本問候測試 (Basic Greeting)",
+    "prompt": "請用繁體中文回答：『你好，我是 ListAgent！』",
+    "tools": [],
+    "model": "qwen2.5-coder-3b-instruct",
+    "check": "result.includes('你好') && result.includes('ListAgent')"
+  },
+  {
+    "id": 2,
+    "name": "簡單數學運算測試 (Simple Math)",
+    "prompt": "請計算 25 * 4 等於多少？請只回答數字。",
+    "tools": [],
+    "model": "qwen2.5-coder-3b-instruct",
+    "check": "result.includes('100') || result.trim() === '100'"
+  },
+  {
+    "id": 3,
+    "name": "文字包含多個關鍵字 (Multiple Keywords)",
+    "prompt": "寫一段關於蘋果 and 香蕉的簡短故事，需同時提到這兩個水果。",
+    "tools": [],
+    "model": "qwen2.5-coder-3b-instruct",
+    "check": "result.includes('蘋果') && result.includes('香蕉')"
+  },
+  {
+    "id": 4,
+    "name": "工具執行檢查測試 (Tool Execution Check)",
+    "prompt": "請使用 execute_command 工具執行 'cmd /c echo hello_listagent_test'，並確保它執行成功。",
+    "tools": ["execute_command"],
+    "model": "qwen2.5-coder-3b-instruct",
+    "check": "session.exchanges.some(ex => ex.phase === 'command_output' && ex.payload.line && ex.payload.line.includes('hello_listagent_test'))"
+  }
+]

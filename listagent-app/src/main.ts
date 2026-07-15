@@ -78,6 +78,8 @@ interface HttpInput {
   agentId?: string
   parameters: unknown
   execId?: string
+  tools?: string[]
+  model?: string
 }
 
 interface EventMapping {
@@ -380,6 +382,8 @@ interface QueuedTask {
   parameters?: unknown
   enqueuedAt: number
   execId?: string
+  overrideTools?: string[]
+  overrideModel?: string
 }
 
 /** 每個 item 各自的 FIFO 任務佇列 */
@@ -1085,7 +1089,7 @@ function selectItem(id: number): void {
 }
 
 /** 呼叫指定 item 設定的模型 API */
-async function runItem(id: number, parameters?: unknown, execId?: string): Promise<void> {
+async function runItem(id: number, parameters?: unknown, execId?: string, overrideTools?: string[], overrideModel?: string): Promise<void> {
   const item = items.find((i) => i.id === id)
   if (!item) return
 
@@ -1097,7 +1101,7 @@ async function runItem(id: number, parameters?: unknown, execId?: string): Promi
     if (queue.length >= MAX_QUEUED_TASKS_PER_ITEM) {
       queueLogs.push({ level: 'error', message: `Queue 已達上限 ${MAX_QUEUED_TASKS_PER_ITEM}，拒絕新任務`, timestamp: Date.now() })
     } else {
-      queue.push({ parameters, enqueuedAt: Date.now(), execId })
+      queue.push({ parameters, enqueuedAt: Date.now(), execId, overrideTools, overrideModel })
       itemTaskQueues.set(id, queue)
       syncAgentStatus()
       queueLogs.push({
@@ -1150,10 +1154,35 @@ async function runItem(id: number, parameters?: unknown, execId?: string): Promi
 
   const resolvedPrompt = resolvePromptArguments(item.prompt, parameters)
 
+  let finalModel = item.modelName
+  let finalApiBaseUrl = item.apiBaseUrl
+  let finalApiKey = item.apiKey
+  let modelOverrideMsg = ''
+
+  if (overrideModel) {
+    const userPresets = await loadUserPresets()
+    const matchedPreset = userPresets.find((p) => p.name === overrideModel)
+      || DEFAULT_PRESETS.find((p) => p.name === overrideModel)
+
+    if (matchedPreset) {
+      finalModel = matchedPreset.modelName
+      finalApiBaseUrl = matchedPreset.apiBaseUrl
+      finalApiKey = matchedPreset.apiKey
+      modelOverrideMsg = ` (載入模型群組「${overrideModel}」)`
+    } else {
+      finalModel = overrideModel
+      modelOverrideMsg = ' (含 HTTP 參數指定)'
+    }
+  }
+
   // 寫入啟動訊息
   const now = Date.now()
   logs.push({ level: 'system', message: `══════ Agent「${item.name}」開始執行 ══════`, timestamp: now })
-  logs.push({ level: 'info', message: `模型：${item.modelName || '未設定'} ｜ 端點：${item.apiBaseUrl || '未設定'}`, timestamp: now + 1 })
+  logs.push({
+    level: 'info',
+    message: `模型：${finalModel || '未設定'}${modelOverrideMsg} ｜ 端點：${finalApiBaseUrl || '未設定'}`,
+    timestamp: now + 1,
+  })
 
   if (parameters !== undefined) {
     if (resolvedPrompt.trim()) {
@@ -1170,10 +1199,14 @@ async function runItem(id: number, parameters?: unknown, execId?: string): Promi
       timestamp: now + 2,
     })
   }
-  if (item.tools.length > 0) {
+  const finalTools = overrideTools && overrideTools.length > 0
+    ? Array.from(new Set([...item.tools, ...overrideTools]))
+    : item.tools
+  if (finalTools.length > 0) {
+    const isOverridden = overrideTools && overrideTools.length > 0
     logs.push({
       level: 'info',
-      message: `已啟用工具：${item.tools.join(', ')}\n工作目錄：${item.workingDirectory || 'App 工作目錄'}`,
+      message: `${isOverridden ? '已啟用工具（含 HTTP 參數勾選）：' : '已啟用工具：'}${finalTools.join(', ')}\n工作目錄：${item.workingDirectory || 'App 工作目錄'}`,
       timestamp: now + 4,
     })
   }
@@ -1221,13 +1254,13 @@ async function runItem(id: number, parameters?: unknown, execId?: string): Promi
     const result = await invoke<AgentExecutionResult>('execute_agent', {
       request: {
         itemId: item.id,
-        apiBaseUrl: item.apiBaseUrl,
-        apiKey: item.apiKey,
-        modelName: item.modelName,
+        apiBaseUrl: finalApiBaseUrl,
+        apiKey: finalApiKey,
+        modelName: finalModel,
         prompt: resolvedPrompt,
         parameters,
         workingDirectory: item.workingDirectory,
-        tools: item.tools,
+        tools: finalTools,
         skills: item.skills,
         mcpServers: item.mcpServers,
         selectedMcpTools: item.mcpTools,
@@ -1309,7 +1342,7 @@ async function runItem(id: number, parameters?: unknown, execId?: string): Promi
         timestamp: Date.now(),
       })
       if (selectedItemId === id && viewingSessionData === null) renderMessageBox(id)
-      void runItem(id, nextTask.parameters, nextTask.execId)
+      void runItem(id, nextTask.parameters, nextTask.execId, nextTask.overrideTools, nextTask.overrideModel)
     }
   }
 }
@@ -1332,7 +1365,7 @@ async function drainHttpInputs(): Promise<void> {
         console.warn(`項目「${item.name}」未啟用 HTTP 接收功能`)
         return
       }
-      void runItem(item.id, input.parameters, input.execId)
+      void runItem(item.id, input.parameters, input.execId, input.tools, input.model)
     })
   } catch (error) {
     console.error('讀取 HTTP 輸入失敗', error)

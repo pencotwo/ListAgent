@@ -35,6 +35,10 @@ pub struct HttpInput {
     pub action: String, // "run" (default) | "get_status" | "list_agents"
     #[serde(default, rename = "execId")]
     pub exec_id: String, // Client-supplied ID for correlating request → agent execution
+    #[serde(default)]
+    pub tools: Vec<String>,
+    #[serde(default)]
+    pub model: String,
     #[serde(default, alias = "params", alias = "input")]
     pub parameters: Value,
 }
@@ -3646,6 +3650,8 @@ fn parse_get_input(request_path: &str) -> Result<HttpInput, String> {
     let mut agent_id = String::new();
     let mut action = String::new();
     let mut exec_id = String::new();
+    let mut tools = Vec::new();
+    let mut model = String::new();
     let mut parameters = serde_json::Map::new();
 
     for pair in query.split('&').filter(|pair| !pair.is_empty()) {
@@ -3670,6 +3676,19 @@ fn parse_get_input(request_path: &str) -> Result<HttpInput, String> {
                 exec_id = value;
                 continue;
             }
+            "tools" | "tool" => {
+                for t in value.split(',') {
+                    let trimmed = t.trim().to_string();
+                    if !trimmed.is_empty() {
+                        tools.push(trimmed);
+                    }
+                }
+                continue;
+            }
+            "model" | "model_name" | "modelName" => {
+                model = value;
+                continue;
+            }
             _ => {}
         }
 
@@ -3690,6 +3709,8 @@ fn parse_get_input(request_path: &str) -> Result<HttpInput, String> {
         agent_id,
         action,
         exec_id,
+        tools,
+        model,
         parameters: Value::Object(parameters),
     })
 }
@@ -3719,6 +3740,39 @@ fn parse_post_input(body: &[u8]) -> Result<HttpInput, String> {
         .or_else(|| object.remove("execId"))
         .and_then(|value| value.as_str().map(str::to_string))
         .unwrap_or_default();
+
+    let mut tools = Vec::new();
+    if let Some(tools_val) = object.remove("tools").or_else(|| object.remove("tool")) {
+        match tools_val {
+            Value::String(s) => {
+                for t in s.split(',') {
+                    let trimmed = t.trim().to_string();
+                    if !trimmed.is_empty() {
+                        tools.push(trimmed);
+                    }
+                }
+            }
+            Value::Array(arr) => {
+                for v in arr {
+                    if let Some(s) = v.as_str() {
+                        let trimmed = s.trim().to_string();
+                        if !trimmed.is_empty() {
+                            tools.push(trimmed);
+                        }
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+
+    let model = object
+        .remove("model")
+        .or_else(|| object.remove("model_name"))
+        .or_else(|| object.remove("modelName"))
+        .and_then(|value| value.as_str().map(str::to_string))
+        .unwrap_or_default();
+
     let parameters = object
         .remove("parameters")
         .or_else(|| object.remove("params"))
@@ -3729,6 +3783,8 @@ fn parse_post_input(body: &[u8]) -> Result<HttpInput, String> {
         agent_id,
         action,
         exec_id,
+        tools,
+        model,
         parameters,
     })
 }
@@ -4101,6 +4157,48 @@ mod tests {
         assert_eq!(input.parameters["arg1"], "alpha");
         assert_eq!(input.parameters["arg2"], 2);
         assert_eq!(input.parameters["arg3"]["ok"], true);
+    }
+
+    #[test]
+    fn get_input_parses_tools_parameter() {
+        let input_comma = parse_get_input("/input?agent=test&tools=read_file,execute_command").unwrap();
+        assert_eq!(input_comma.tools, vec!["read_file", "execute_command"]);
+
+        // Since parse_get_input iterates and parameters.get_mut treats subsequent items as parameter override/array,
+        // multiple "tools" query params will populate tools twice.
+        let input_multi = parse_get_input("/input?agent=test&tools=read_file&tools=execute_command").unwrap();
+        assert_eq!(input_multi.tools, vec!["read_file", "execute_command"]);
+    }
+
+    #[test]
+    fn post_input_parses_tools_parameter() {
+        let body_str = r#"{"agent":"test","tools":"read_file,execute_command"}"#;
+        let input_str = parse_post_input(body_str.as_bytes()).unwrap();
+        assert_eq!(input_str.tools, vec!["read_file", "execute_command"]);
+
+        let body_arr = r#"{"agent":"test","tools":["read_file","execute_command"]}"#;
+        let input_arr = parse_post_input(body_arr.as_bytes()).unwrap();
+        assert_eq!(input_arr.tools, vec!["read_file", "execute_command"]);
+    }
+
+    #[test]
+    fn get_input_parses_model_parameter() {
+        let input = parse_get_input("/input?agent=test&model=gpt-4o").unwrap();
+        assert_eq!(input.model, "gpt-4o");
+
+        let input_name = parse_get_input("/input?agent=test&model_name=claude-3-5").unwrap();
+        assert_eq!(input_name.model, "claude-3-5");
+    }
+
+    #[test]
+    fn post_input_parses_model_parameter() {
+        let body = r#"{"agent":"test","model":"gpt-4o"}"#;
+        let input = parse_post_input(body.as_bytes()).unwrap();
+        assert_eq!(input.model, "gpt-4o");
+
+        let body_camel = r#"{"agent":"test","modelName":"claude-3-5"}"#;
+        let input_camel = parse_post_input(body_camel.as_bytes()).unwrap();
+        assert_eq!(input_camel.model, "claude-3-5");
     }
 
     #[test]
