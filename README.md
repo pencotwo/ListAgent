@@ -60,29 +60,61 @@ Click the `+` button to add a new item, then fill in:
 - **Manual** — select the agent, type into its input box, and click Run.
 - **Scheduled Events** — open the clock icon to create one-time or recurring triggers bound to a specific agent.
 - **Custom Events** — an agent with the `trigger_event` tool can fire an event ID that runs other agents mapped to that event, passing `message`/`arg1`/`arg2`/`arg3` along.
-- **HTTP API** — enable "Allow HTTP request to run this agent's task" on the agent, then call the local server on `127.0.0.1:37123` (only active while the app is running):
+- **HTTP API** — enable "Allow HTTP request to run this agent's task" on the agent, then call the local server on `127.0.0.1:37123` (only active while the app is running). See [HTTP API](#http-api) below for the full parameter reference.
 
-  ```
-  GET /input?agent_id=<id>&action=run&exec_id=<your-id>&message=hello
-  ```
+## HTTP API
 
-  or the JSON equivalent:
+The app runs a local HTTP server on `http://127.0.0.1:37123` while it is open. Two switches gate it: the global "HTTP trigger" toggle in event settings (off → every `/input` call returns `403`), and the per-agent "Allow HTTP request" checkbox (unchecked → the request is accepted but silently dropped at dispatch).
 
-  ```bash
-  curl -X POST http://127.0.0.1:37123/input \
-    -H "Content-Type: application/json" \
-    -d '{"agent_id":"<id>","action":"run","exec_id":"<your-id>","parameters":{"message":"hello"}}'
-  ```
+### Endpoints
 
-  Parameters:
-  - `agent_id` (preferred) or `agent` (name) — which agent to run.
-  - `action` — `run` (default), `get_status`, or `list_agents`.
-  - `exec_id` — a caller-supplied ID to correlate this call with its result/session.
-  - `message`, `arg1`, `arg2`, `arg3` — substituted into the matching `{message}`/`{arg1}`/... placeholders in the agent's prompt.
+| Endpoint | Method | Purpose |
+|---|---|---|
+| `/input` | GET / POST | Run an agent, query status, or list agents (see parameters below). |
+| `/health` | GET | Liveness check; always returns `{"status":"ok"}`. |
+| `/session_file?path=...` | GET | Read back a saved session JSON (e.g. the `lastSessionUrl` from `get_status`). Only `.json` files under a `.ListAgent/session` or `.listagent/sessions` directory are allowed. |
 
-  Other endpoints: `GET /health` (liveness check) and `GET /session_file?path=...` (read back a saved session JSON, e.g. the `lastSessionUrl` returned after a run).
+### `/input` parameters
 
-  `action=list_agents` returns every configured agent's `agentId`, `name`, and whether HTTP is allowed. `action=get_status` (optionally scoped with `agent`/`agent_id`) returns currently running/queued agents and per-agent run detail (round, tokens, last result, etc.) without starting anything.
+Send them as URL query parameters (GET) or as a JSON object body (POST, `Content-Type: application/json`, max 1 MB). Both forms accept the same parameters:
+
+| Parameter | Aliases | Type | Required | Description |
+|---|---|---|---|---|
+| `agent_id` | `agentId` | string | one of `agent_id` / `agent` (for `run`) | Stable agent ID — preferred, since it survives renames. Shown in the agent's edit form. |
+| `agent` | — | string | — | Agent display name (max 200 chars). Fallback when `agent_id` is not given; matching is by name. |
+| `action` | — | string | no | `run` (default), `get_status`, or `list_agents`. Any other value returns `400`. |
+| `exec_id` | `execId` | string | no | Caller-supplied correlation ID. Echoed back by `get_status` as `currentExecId` while the run is active and `lastExecId` after it ends. |
+| `tools` | `tool` | string / array | no | Extra tools to enable **for this run only**, merged (union) with the agent's configured tools. Comma-separated string (`tools=read_file,write_file`) or, in POST, a JSON array. |
+| `model` | `model_name`, `modelName` | string | no | Overrides the agent's model name for this run only. |
+| `parameters` | `params`, `input` | object | no | POST only: JSON object holding the prompt arguments (see below). If omitted, any *other* top-level keys in the body are collected into `parameters` instead. |
+| *(any other key)* | — | string | no | GET only: every unrecognized query key becomes an entry in `parameters` (a repeated key becomes an array of values). |
+
+**Prompt arguments** — inside `parameters`, the keys `message`, `arg1`, `arg2`, `arg3` are substituted into the matching `{message}` / `{arg1}` / `{arg2}` / `{arg3}` placeholders in the agent's prompt (non-string values are JSON-stringified). The full `parameters` object is also passed to the agent as the user input of the run. Other keys are carried along but have no placeholder substitution.
+
+**Examples**
+
+```
+GET /input?agent_id=<id>&action=run&exec_id=job-42&message=hello&arg1=alpha
+```
+
+```bash
+curl -X POST http://127.0.0.1:37123/input \
+  -H "Content-Type: application/json" \
+  -d '{
+    "agent_id": "<id>",
+    "action": "run",
+    "exec_id": "job-42",
+    "tools": ["read_file", "write_file"],
+    "model": "qwen2.5-coder-3b-instruct",
+    "parameters": { "message": "hello", "arg1": "alpha" }
+  }'
+```
+
+### Actions and responses
+
+- **`action=run`** — queues the run and immediately returns `202 Accepted` with `{"accepted":true,"agent":...,"agentId":...,"action":"run"}`. Execution is asynchronous (up to 1000 requests are queued; the oldest is dropped when full) — poll `get_status` with your `exec_id` to track completion.
+- **`action=get_status`** — runs nothing. Without `agent`/`agent_id` it returns the global snapshot `{running:[names], queued:{name:count}, detail:{name:{...}}, updatedAt}`; with `agent`/`agent_id` it returns that agent's `{agent, agentId, running, queued, detail, updatedAt}`. The `detail` object includes `currentRound`, `currentTokens`, `currentExecId`, `lastEndedAt`, `lastSuccess`, `lastContentPreview`, `lastTokens`, `lastPromptTokens`, `lastRounds`, `lastExecId`, `lastSessionPath`, and `lastSessionUrl` (fetchable via `/session_file`).
+- **`action=list_agents`** — returns `{"agents":[{"agentId":...,"name":...,"allowHttp":true|false}]}` for every configured agent.
 
 ## Where things are stored
 
