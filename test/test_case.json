@@ -227,7 +227,7 @@
     "id": 29,
     "name": "關鍵字搜尋工具測試 (Tool Grep Search)",
     "prompt": "請在 'test' 目錄底下搜尋包含關鍵字 'Basic Greeting' 的檔案。",
-    "tools": ["grep_search"],
+    "tools": ["grep_search", "list_dir", "list_directory"],
     "model": "qwen2.5-coder-3b-instruct",
     "check": "session.exchanges.some(ex => ex.phase === 'tool_call' && ex.payload.name === 'grep_search')"
   }
