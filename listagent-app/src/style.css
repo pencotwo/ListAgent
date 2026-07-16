@@ -686,6 +686,51 @@ body {
   50%      { box-shadow: 0 0 0 8px rgba(239, 68, 68, 0); }
 }
 
+/* 暫停／繼續按鈕 */
+.btn-pause {
+  width: 34px;
+  height: 34px;
+  border-radius: 50%;
+  border: 2px solid var(--border);
+  background: var(--bg-primary);
+  font-size: 13px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  color: var(--text-secondary);
+  transition: all 0.2s ease;
+  margin-right: 2px;
+}
+
+.btn-pause:hover:not(:disabled) {
+  border-color: var(--accent);
+  background: var(--accent-light);
+  transform: scale(1.1);
+}
+
+.btn-pause:disabled {
+  cursor: default;
+  opacity: 0.6;
+}
+
+.btn-pause-active {
+  border-color: var(--accent);
+  color: var(--accent);
+  animation: pulse-run 1.2s ease-in-out infinite;
+}
+
+.btn-pause-resume {
+  border-color: #22c55e;
+  color: #22c55e;
+}
+
+.btn-pause-resume:hover:not(:disabled) {
+  background: rgba(34, 197, 94, 0.1);
+  border-color: #22c55e;
+}
+
 /* 執行狀態轉圈圈：running=1 個亮色 + queued=N 個淡色，按鈕左邊排開 */
 .run-spinners {
   display: inline-flex;
@@ -871,6 +916,10 @@ body {
   margin-right: 0;
 }
 
+#list-container.card-layout .item-card .btn-pause {
+  margin-right: 0;
+}
+
 /* 卡片 hover 時仍保持原有動畫 */
 #list-container.card-layout .item-card:hover {
   border-color: var(--accent);
@@ -942,6 +991,14 @@ body.theme-glass-neon #list-container.card-layout .item-card.selected {
 }
 
 .item-list-row .btn-run {
+  width: 28px;
+  height: 28px;
+  font-size: 12px;
+  border-width: 1.5px;
+  margin-right: 0;
+}
+
+.item-list-row .btn-pause {
   width: 28px;
   height: 28px;
   font-size: 12px;

@@ -96,6 +96,18 @@ interface AgentExecutionResult {
   endpoint: string
   content: string
   stats?: unknown
+  paused?: boolean
+  resumeState?: { messages: unknown[], roundIndex: number }
+}
+
+/** 暫停任務時保留的繼續執行所需資訊（記憶體中；同時會存進 session 檔以撐過關閉 App） */
+interface PausedTaskInfo {
+  resumeMessages: unknown[]
+  resumeRound: number
+  parameters?: unknown
+  execId?: string
+  overrideTools?: string[]
+  overrideModel?: string
 }
 
 interface ModelExchangeEvent {
@@ -124,6 +136,10 @@ interface SessionData {
   apiBaseUrl: string
   logs?: LogEntry[]
   exchanges: SessionExchange[]
+  /** 任務在此 session 中被暫停時設為 true；同時附上繼續執行所需的完整對話狀態 */
+  paused?: boolean
+  pausedResumeState?: { messages: unknown[], roundIndex: number }
+  pausedTaskMeta?: { parameters?: unknown, execId?: string, overrideTools?: string[], overrideModel?: string }
 }
 
 interface SessionFileMeta {
@@ -303,6 +319,12 @@ let viewingSessionPath: string | null = null
 
 /** 目前正在等待模型回應的 item */
 const runningItems = new Set<number>()
+
+/** 已暫停、可按「繼續」接續執行的 item（跨 App 重啟也會從 session 檔還原） */
+const pausedTasks = new Map<number, PausedTaskInfo>()
+
+/** 已送出暫停請求、正等待目前 round 跑完生效的 item */
+const pausingItems = new Set<number>()
 
 interface AgentTaskDetail {
   currentRound?: number
@@ -807,10 +829,14 @@ function createItemCard(item: ListItem): HTMLElement {
     void runItem(item.id)
   })
 
-  // 底部列：spinners + run button
+  // 暫停／繼續按鈕
+  const pauseBtn = createPauseButton(item)
+
+  // 底部列：spinners + run button + pause button
   const bottomRow = document.createElement('div')
   bottomRow.className = 'card-bottom-row'
   bottomRow.appendChild(spinners)
+  bottomRow.appendChild(pauseBtn)
   bottomRow.appendChild(runBtn)
 
   // 右側：齒輪按鈕
@@ -921,6 +947,8 @@ function createItemListRow(item: ListItem): HTMLElement {
     openSettingsDialog(item.id)
   })
 
+  const pauseBtn = createPauseButton(item)
+
   row.addEventListener('mouseenter', () => {
     gearBtn.classList.add('visible')
   })
@@ -950,6 +978,7 @@ function createItemListRow(item: ListItem): HTMLElement {
   }
   row.appendChild(info)
   row.appendChild(spinners)
+  row.appendChild(pauseBtn)
   row.appendChild(runBtn)
   row.appendChild(gearBtn)
 
@@ -1089,7 +1118,7 @@ function selectItem(id: number): void {
 }
 
 /** 呼叫指定 item 設定的模型 API */
-async function runItem(id: number, parameters?: unknown, execId?: string, overrideTools?: string[], overrideModel?: string): Promise<void> {
+async function runItem(id: number, parameters?: unknown, execId?: string, overrideTools?: string[], overrideModel?: string, resumeState?: { messages: unknown[], round: number }): Promise<void> {
   const item = items.find((i) => i.id === id)
   if (!item) return
 
@@ -1115,12 +1144,21 @@ async function runItem(id: number, parameters?: unknown, execId?: string, overri
     return
   }
 
-  // 開始新 session：清除 UI log 與 exchanges，確保每次 run 都是乾淨的開始
-  itemLogs.set(id, [])
-  currentSessionExchanges.set(id, [])
+  // 開始新 session：清除 UI log 與 exchanges，確保每次 run 都是乾淨的開始；
+  // 若是從暫停繼續，則沿用既有的 log／session，不重置（讓執行過程接續顯示）。
+  if (resumeState) {
+    if (!itemLogs.has(id)) itemLogs.set(id, [])
+    if (!currentSessionExchanges.has(id)) currentSessionExchanges.set(id, [])
+    if (!currentSessionStartedAt.has(id)) currentSessionStartedAt.set(id, Date.now())
+  } else {
+    // 全新開始執行（非繼續）：若此 item 原本有暫停中的任務，視為放棄，清掉暫停狀態
+    pausedTasks.delete(id)
+    itemLogs.set(id, [])
+    currentSessionExchanges.set(id, [])
+    currentSessionStartedAt.set(id, Date.now())
+    startLiveSession(item)
+  }
   const logs = itemLogs.get(id)!
-  currentSessionStartedAt.set(id, Date.now())
-  startLiveSession(item)
 
   // 若此 item 正在查看歷史 session，自動切回即時模式
   if (selectedItemId === id && viewingSessionData !== null) {
@@ -1129,7 +1167,7 @@ async function runItem(id: number, parameters?: unknown, execId?: string, overri
     renderSessionHistoryActiveState()
   }
 
-  if (parameters !== undefined) {
+  if (parameters !== undefined && !resumeState) {
     let sourceMsg = `HTTP 輸入參數：${JSON.stringify(parameters)}`
     if (parameters && typeof parameters === 'object' && '_triggerSource' in parameters) {
       const p = parameters as any
@@ -1175,62 +1213,72 @@ async function runItem(id: number, parameters?: unknown, execId?: string, overri
     }
   }
 
-  // 寫入啟動訊息
-  const now = Date.now()
-  logs.push({ level: 'system', message: `══════ Agent「${item.name}」開始執行 ══════`, timestamp: now })
-  logs.push({
-    level: 'info',
-    message: `模型：${finalModel || '未設定'}${modelOverrideMsg} ｜ 端點：${finalApiBaseUrl || '未設定'}`,
-    timestamp: now + 1,
-  })
-
-  if (parameters !== undefined) {
-    if (resolvedPrompt.trim()) {
-      logs.push({ level: 'system', message: `發送給 AI 模型的 System Prompt：\n${resolvedPrompt}`, timestamp: now + 2 })
-    }
-    const modelInput = typeof parameters === 'string'
-      ? parameters
-      : JSON.stringify(parameters, null, 2)
-    logs.push({ level: 'system', message: `發送給 AI 模型的輸入：\n${modelInput}`, timestamp: now + 3 })
-  } else {
-    logs.push({
-      level: resolvedPrompt.trim() ? 'system' : 'warn',
-      message: `發送給 AI 模型的 Prompt：\n${resolvedPrompt || '（空白）'}`,
-      timestamp: now + 2,
-    })
-  }
   const finalTools = overrideTools && overrideTools.length > 0
     ? Array.from(new Set([...item.tools, ...overrideTools]))
     : item.tools
-  if (finalTools.length > 0) {
-    const isOverridden = overrideTools && overrideTools.length > 0
+
+  const now = Date.now()
+  if (resumeState) {
+    // 從暫停繼續：不重複記錄 Prompt/工具等啟動資訊，只標示接續點
+    logs.push({
+      level: 'system',
+      message: `══════ Agent「${item.name}」從第 ${resumeState.round + 1} 輪繼續執行 ══════`,
+      timestamp: now,
+    })
+  } else {
+    // 寫入啟動訊息
+    logs.push({ level: 'system', message: `══════ Agent「${item.name}」開始執行 ══════`, timestamp: now })
     logs.push({
       level: 'info',
-      message: `${isOverridden ? '已啟用工具（含 HTTP 參數勾選）：' : '已啟用工具：'}${finalTools.join(', ')}\n工作目錄：${item.workingDirectory || 'App 工作目錄'}`,
-      timestamp: now + 4,
+      message: `模型：${finalModel || '未設定'}${modelOverrideMsg} ｜ 端點：${finalApiBaseUrl || '未設定'}`,
+      timestamp: now + 1,
     })
-  }
-  if (item.skills.length > 0) {
-    logs.push({
-      level: 'info',
-      message: `已載入 Skills：${item.skills.join(', ')}`,
-      timestamp: now + 5,
-    })
-  }
-  const enabledMcp = item.mcpServers.filter((s) => s.enabled)
-  if (enabledMcp.length > 0) {
-    logs.push({
-      level: 'info',
-      message: `MCP Servers：${enabledMcp.map((s) => `${s.name} (${s.transport})`).join(', ')}`,
-      timestamp: now + 6,
-    })
-  }
-  if (item.memory) {
-    logs.push({
-      level: 'info',
-      message: '記憶功能：開啟（自動攜帶上次對話歷史）',
-      timestamp: now + 7,
-    })
+
+    if (parameters !== undefined) {
+      if (resolvedPrompt.trim()) {
+        logs.push({ level: 'system', message: `發送給 AI 模型的 System Prompt：\n${resolvedPrompt}`, timestamp: now + 2 })
+      }
+      const modelInput = typeof parameters === 'string'
+        ? parameters
+        : JSON.stringify(parameters, null, 2)
+      logs.push({ level: 'system', message: `發送給 AI 模型的輸入：\n${modelInput}`, timestamp: now + 3 })
+    } else {
+      logs.push({
+        level: resolvedPrompt.trim() ? 'system' : 'warn',
+        message: `發送給 AI 模型的 Prompt：\n${resolvedPrompt || '（空白）'}`,
+        timestamp: now + 2,
+      })
+    }
+    if (finalTools.length > 0) {
+      const isOverridden = overrideTools && overrideTools.length > 0
+      logs.push({
+        level: 'info',
+        message: `${isOverridden ? '已啟用工具（含 HTTP 參數勾選）：' : '已啟用工具：'}${finalTools.join(', ')}\n工作目錄：${item.workingDirectory || 'App 工作目錄'}`,
+        timestamp: now + 4,
+      })
+    }
+    if (item.skills.length > 0) {
+      logs.push({
+        level: 'info',
+        message: `已載入 Skills：${item.skills.join(', ')}`,
+        timestamp: now + 5,
+      })
+    }
+    const enabledMcp = item.mcpServers.filter((s) => s.enabled)
+    if (enabledMcp.length > 0) {
+      logs.push({
+        level: 'info',
+        message: `MCP Servers：${enabledMcp.map((s) => `${s.name} (${s.transport})`).join(', ')}`,
+        timestamp: now + 6,
+      })
+    }
+    if (item.memory) {
+      logs.push({
+        level: 'info',
+        message: '記憶功能：開啟（自動攜帶上次對話歷史）',
+        timestamp: now + 7,
+      })
+    }
   }
   scheduleLiveSessionFlush(item, 100)
 
@@ -1249,6 +1297,7 @@ async function runItem(id: number, parameters?: unknown, execId?: string, overri
   // 追蹤此次執行結果，供 finally 建立 lastTaskByAgent 條目使用
   let taskSuccess = false
   let taskContent = ''
+  let taskPaused = false
 
   try {
     const result = await invoke<AgentExecutionResult>('execute_agent', {
@@ -1270,17 +1319,37 @@ async function runItem(id: number, parameters?: unknown, execId?: string, overri
         embeddingApiBaseUrl: globalEmbeddingApiBaseUrl,
         embeddingApiKey: globalEmbeddingApiKey,
         embeddingModel: globalEmbeddingModel,
+        resumeMessages: resumeState?.messages,
+        resumeRound: resumeState?.round,
       },
     })
-    logs.push({ level: 'success', message: `模型端點：${result.endpoint}`, timestamp: Date.now() })
-    logs.push({ level: 'system', message: result.content, html: renderMarkdownSafe(result.content), timestamp: Date.now() + 1 })
-    taskSuccess = true
-    taskContent = result.content ?? ''
+    if (result.paused && result.resumeState) {
+      taskPaused = true
+      pausedTasks.set(id, {
+        resumeMessages: result.resumeState.messages,
+        resumeRound: result.resumeState.roundIndex,
+        parameters,
+        execId,
+        overrideTools,
+        overrideModel,
+      })
+      logs.push({
+        level: 'system',
+        message: `⏸ Agent「${item.name}」已暫停（已完成 ${result.resumeState.roundIndex} 輪，可按「繼續」接續執行）`,
+        timestamp: Date.now(),
+      })
+    } else {
+      logs.push({ level: 'success', message: `模型端點：${result.endpoint}`, timestamp: Date.now() })
+      logs.push({ level: 'system', message: result.content, html: renderMarkdownSafe(result.content), timestamp: Date.now() + 1 })
+      taskSuccess = true
+      taskContent = result.content ?? ''
+    }
   } catch (error) {
     logs.push({ level: 'error', message: `模型請求失敗：${String(error)}`, timestamp: Date.now() })
     taskSuccess = false
     taskContent = String(error)
   } finally {
+    pausingItems.delete(id)
     // 統整 token 用量（總計），在結束分隔線之前顯示
     const summary = summarizeSessionTokens(id)
     if (summary.rounds.length > 0) {
@@ -1300,22 +1369,27 @@ async function runItem(id: number, parameters?: unknown, execId?: string, overri
       lines.push(`  Total執行時間：${durationSec} 秒`)
       logs.push({ level: 'info', message: lines.join('\n'), timestamp: Date.now() })
     }
-    logs.push({ level: 'system', message: `══════ Agent「${item.name}」執行結束 ══════`, timestamp: Date.now() + 1 })
+    if (!taskPaused) {
+      logs.push({ level: 'system', message: `══════ Agent「${item.name}」執行結束 ══════`, timestamp: Date.now() + 1 })
+    }
     runningItems.delete(id)
     updateInputBoxState()
-    // 記錄此次任務結果（下次 sync 會帶到 lastEndedAt / lastSuccess / lastTokens…）
+    // 記錄此次任務結果（下次 sync 會帶到 lastEndedAt / lastSuccess / lastTokens…）；
+    // 暫停不算「結束」，維持上一次真正完成的紀錄，避免覆蓋成不明確的狀態。
     const finishedExecId = currentExecIdByItem.get(id)
     currentExecIdByItem.delete(id)
-    lastTaskByAgent.set(item.name, {
-      lastEndedAt: Date.now(),
-      lastSuccess: taskSuccess,
-      lastContentPreview: taskContent.length > 200 ? taskContent.slice(0, 200) + '…' : taskContent,
-      lastTokens: summary.total.total,
-      lastRounds: summary.rounds.length,
-      lastExecId: finishedExecId,
-      lastPromptTokens: summary.total.prompt,
-      lastCachedTokens: summary.total.cachedTokens,
-    })
+    if (!taskPaused) {
+      lastTaskByAgent.set(item.name, {
+        lastEndedAt: Date.now(),
+        lastSuccess: taskSuccess,
+        lastContentPreview: taskContent.length > 200 ? taskContent.slice(0, 200) + '…' : taskContent,
+        lastTokens: summary.total.total,
+        lastRounds: summary.rounds.length,
+        lastExecId: finishedExecId,
+        lastPromptTokens: summary.total.prompt,
+        lastCachedTokens: summary.total.cachedTokens,
+      })
+    }
     const queue = itemTaskQueues.get(id)
     const nextTask = queue?.shift()
     if (queue && queue.length === 0) itemTaskQueues.delete(id)
@@ -1325,16 +1399,22 @@ async function runItem(id: number, parameters?: unknown, execId?: string, overri
     updateCardRunButton(id, false)
     if (selectedItemId === id && viewingSessionData === null) renderMessageBox(id)
 
-    // 儲存本次 session，並把路徑補進 lastTaskByAgent，讓 status 能提供 session link
-    void saveCurrentSession(item).then((savedPath) => {
-      if (savedPath) {
-        const info = lastTaskByAgent.get(item.name) ?? {}
-        info.lastSessionPath = savedPath
-        info.lastSessionUrl = `http://127.0.0.1:37123/session_file?path=${encodeURIComponent(savedPath)}`
-        lastTaskByAgent.set(item.name, info)
-        syncAgentStatus()  // 再同步一次，讓 status 帶到 sessionPath / sessionUrl
-      }
-    })
+    if (taskPaused) {
+      // 存檔暫停狀態（含完整對話與繼續執行所需參數），讓即使關閉 App 也能從此處接續。
+      const pausedInfo = pausedTasks.get(id)
+      if (pausedInfo) void savePausedSession(item, pausedInfo)
+    } else {
+      // 儲存本次 session，並把路徑補進 lastTaskByAgent，讓 status 能提供 session link
+      void saveCurrentSession(item).then((savedPath) => {
+        if (savedPath) {
+          const info = lastTaskByAgent.get(item.name) ?? {}
+          info.lastSessionPath = savedPath
+          info.lastSessionUrl = `http://127.0.0.1:37123/session_file?path=${encodeURIComponent(savedPath)}`
+          lastTaskByAgent.set(item.name, info)
+          syncAgentStatus()  // 再同步一次，讓 status 帶到 sessionPath / sessionUrl
+        }
+      })
+    }
     if (nextTask) {
       logs.push({
         level: 'system',
@@ -1373,6 +1453,89 @@ async function drainHttpInputs(): Promise<void> {
 }
 
 /** 更新卡片上的執行狀態 */
+/** 此 item 是否會跑多輪 tool-calling（有工具／MCP／tools_search）——只有這種才有「暫停」的意義 */
+function isPauseEligible(item: ListItem): boolean {
+  return item.tools.length > 0 || item.mcpServers.some((s) => s.enabled) || item.toolsSearch
+}
+
+function pauseButtonState(item: ListItem): 'hidden' | 'pause' | 'pausing' | 'resume' {
+  if (pausedTasks.has(item.id)) return 'resume'
+  if (!runningItems.has(item.id) || !isPauseEligible(item)) return 'hidden'
+  if (pausingItems.has(item.id)) return 'pausing'
+  return 'pause'
+}
+
+/** 建立暫停／繼續按鈕（放在執行按鈕旁） */
+function createPauseButton(item: ListItem): HTMLButtonElement {
+  const btn = document.createElement('button')
+  btn.className = 'btn-pause'
+  btn.addEventListener('click', (e) => {
+    e.stopPropagation()
+    void handlePauseButtonClick(item.id)
+  })
+  applyPauseButtonState(btn, item)
+  return btn
+}
+
+function applyPauseButtonState(btn: HTMLButtonElement, item: ListItem): void {
+  const state = pauseButtonState(item)
+  btn.classList.remove('btn-pause-resume', 'btn-pause-active')
+  if (state === 'hidden') {
+    btn.style.display = 'none'
+    btn.disabled = true
+    return
+  }
+  btn.style.display = ''
+  if (state === 'resume') {
+    btn.innerHTML = '▶'
+    btn.title = '繼續執行（從上次暫停處接續）'
+    btn.disabled = false
+    btn.classList.add('btn-pause-resume')
+  } else if (state === 'pausing') {
+    btn.innerHTML = '⏸'
+    btn.title = '暫停中…（等目前這一輪跑完後生效）'
+    btn.disabled = true
+    btn.classList.add('btn-pause-active')
+  } else {
+    btn.innerHTML = '⏸'
+    btn.title = '暫停（等目前這一輪跑完後停止，可稍後按「繼續」接續）'
+    btn.disabled = false
+  }
+}
+
+/** 暫停／繼續按鈕的點擊處理 */
+async function handlePauseButtonClick(id: number): Promise<void> {
+  if (pausedTasks.has(id)) {
+    void resumeItem(id)
+    return
+  }
+  if (!runningItems.has(id) || pausingItems.has(id)) return
+  pausingItems.add(id)
+  updateCardRunButton(id, true)
+  const logs = itemLogs.get(id)
+  if (logs) {
+    logs.push({ level: 'info', message: '⏸ 已送出暫停請求，將於目前這一輪執行完成後暫停…', timestamp: Date.now() })
+    if (selectedItemId === id && viewingSessionData === null) renderMessageBox(id)
+  }
+  try {
+    await invoke('request_pause_agent', { itemId: id })
+  } catch (error) {
+    console.error('暫停請求失敗', error)
+  }
+}
+
+/** 從暫停處接續執行 */
+async function resumeItem(id: number): Promise<void> {
+  const info = pausedTasks.get(id)
+  if (!info) return
+  pausedTasks.delete(id)
+  updateCardRunButton(id, runningItems.has(id))
+  await runItem(id, info.parameters, info.execId, info.overrideTools, info.overrideModel, {
+    messages: info.resumeMessages,
+    round: info.resumeRound,
+  })
+}
+
 function updateCardRunButton(id: number, running: boolean): void {
   const card = document.querySelector(`.item-card[data-id="${id}"], .item-list-row[data-id="${id}"]`) as HTMLElement | null
   if (!card) return
@@ -1381,16 +1544,20 @@ function updateCardRunButton(id: number, running: boolean): void {
   if (spinners) renderSpinners(spinners, id)
 
   const btn = card.querySelector('.btn-run') as HTMLButtonElement | null
-  if (!btn) return
-
-  // 按鈕本身不再變沙漏／禁用，僅更新 tooltip 與 card class
-  btn.innerHTML = '▶️'
-  btn.title = running ? '再按會加入 Queue' : '執行'
+  if (btn) {
+    // 按鈕本身不再變沙漏／禁用，僅更新 tooltip 與 card class
+    btn.innerHTML = '▶️'
+    btn.title = running ? '再按會加入 Queue' : '執行'
+  }
   if (running) {
     card.classList.add('has-running-agent')
   } else {
     card.classList.remove('has-running-agent')
   }
+
+  const item = items.find((i) => i.id === id)
+  const pauseBtn = card.querySelector('.btn-pause') as HTMLButtonElement | null
+  if (item && pauseBtn) applyPauseButtonState(pauseBtn, item)
 }
 
 /** 渲染訊息框內容（即時執行過程） */
@@ -2070,7 +2237,7 @@ function scheduleLiveSessionFlush(item: ListItem, delayMs: number): void {
   currentSessionFlushTimers.set(item.id, timer)
 }
 
-async function flushLiveSessionNow(item: ListItem, endedAt?: number): Promise<string | null> {
+async function flushLiveSessionNow(item: ListItem, endedAt?: number, pausedInfo?: PausedTaskInfo): Promise<string | null> {
   if (!isTauri()) return null
   const timer = currentSessionFlushTimers.get(item.id)
   if (timer !== undefined) {
@@ -2079,6 +2246,16 @@ async function flushLiveSessionNow(item: ListItem, endedAt?: number): Promise<st
   }
   const meta = ensureLiveSessionMeta(item)
   const session = buildSessionSnapshot(item, endedAt)
+  if (pausedInfo) {
+    session.paused = true
+    session.pausedResumeState = { messages: pausedInfo.resumeMessages, roundIndex: pausedInfo.resumeRound }
+    session.pausedTaskMeta = {
+      parameters: pausedInfo.parameters,
+      execId: pausedInfo.execId,
+      overrideTools: pausedInfo.overrideTools,
+      overrideModel: pausedInfo.overrideModel,
+    }
+  }
   const previous = currentSessionWriteChains.get(item.id) ?? Promise.resolve()
   const write = previous.catch(() => undefined).then(async () => {
     await invoke('save_session', {
@@ -2130,6 +2307,61 @@ async function saveCurrentSession(item: ListItem): Promise<string | null> {
     if (selectedItemId === item.id && viewingSessionData === null) renderMessageBox(item.id)
     return null
   }
+}
+
+/** 暫停時把「可繼續執行的完整狀態」寫進目前這個 session 檔，讓即使關閉 App 也能之後按「繼續」接續。
+ * 必須走 flushLiveSessionNow：它會取消尚未觸發的 debounce flush 計時器並排入同一條寫入佇列，
+ * 否則稍後補上的一次即時 flush（例如 runItem 開頭排定的 100ms flush）會用不含 paused 欄位的
+ * snapshot 蓋掉這次寫入，暫停狀態就會在使用者關閉 App 前就被悄悄清掉。 */
+async function savePausedSession(item: ListItem, info: PausedTaskInfo): Promise<string | null> {
+  if (!isTauri()) return null
+  try {
+    const savedPath = await flushLiveSessionNow(item, undefined, info)
+    if (!savedPath) throw new Error('即時 session 寫入失敗')
+    if (selectedItemId === item.id) {
+      await loadAndRenderSessions(item)
+    }
+    return savedPath
+  } catch (error) {
+    console.error('儲存暫停狀態失敗', error)
+    return null
+  }
+}
+
+/** App 啟動時掃描每個 item 最新的 session，還原被暫停、可按「繼續」接續的任務（跨 App 重啟也適用） */
+async function restorePausedTasks(): Promise<void> {
+  if (!isTauri()) return
+  await Promise.all(items.map(async (item) => {
+    try {
+      const sessions = await invoke<SessionFileMeta[]>('list_sessions', {
+        workingDirectory: item.workingDirectory,
+        subdir: item.code,
+      })
+      const latest = sessions[0]
+      if (!latest) return
+      const raw = await invoke<string>('read_session_file', { path: latest.path })
+      const session = JSON.parse(raw) as SessionData
+      if (session.itemId !== item.id || !session.paused || !session.pausedResumeState) return
+
+      pausedTasks.set(item.id, {
+        resumeMessages: session.pausedResumeState.messages,
+        resumeRound: session.pausedResumeState.roundIndex,
+        parameters: session.pausedTaskMeta?.parameters,
+        execId: session.pausedTaskMeta?.execId,
+        overrideTools: session.pausedTaskMeta?.overrideTools,
+        overrideModel: session.pausedTaskMeta?.overrideModel,
+      })
+      // 還原 log／exchanges，讓「繼續」執行時的過程能與暫停前接續顯示
+      itemLogs.set(item.id, session.logs ?? [])
+      currentSessionExchanges.set(item.id, session.exchanges ?? [])
+      currentSessionIds.set(item.id, session.sessionId)
+      currentSessionFilenames.set(item.id, `${session.sessionId}.json`)
+      currentSessionSavedPaths.set(item.id, sessionSavedPath(item, session.sessionId))
+      currentSessionStartedAt.set(item.id, session.startedAt)
+    } catch (error) {
+      console.error(`還原暫停任務失敗（item ${item.id}）`, error)
+    }
+  }))
 }
 
 /** 載入並渲染歷史 session 清單 */
@@ -4081,6 +4313,7 @@ if (selectTheme) {
 
   updateViewToggleUI()
   updateListViewToggleUI()
+  await restorePausedTasks()
   renderList()
   renderScheduledEvents()
   updateInputBoxState()

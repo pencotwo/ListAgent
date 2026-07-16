@@ -13,7 +13,6 @@ use tokio::io::{AsyncBufReadExt, AsyncWriteExt};
 const HTTP_SERVER_ADDRESS: &str = "127.0.0.1:37123";
 const MAX_REQUEST_BODY_SIZE: usize = 1024 * 1024;
 const MAX_QUEUED_INPUTS: usize = 1000;
-const MAX_TOOL_ITERATIONS: usize = 30;
 const DEFAULT_COMMAND_TIMEOUT_SECONDS: u64 = 30;
 const MAX_COMMAND_TIMEOUT_SECONDS: u64 = 7200;
 fn default_max_rounds() -> u32 {
@@ -159,6 +158,30 @@ fn send_agent_message(itemId: u32, message: String) {
     }
 }
 
+fn pause_requests() -> &'static std::sync::Mutex<std::collections::HashSet<u32>> {
+    static INSTANCE: std::sync::OnceLock<std::sync::Mutex<std::collections::HashSet<u32>>> =
+        std::sync::OnceLock::new();
+    INSTANCE.get_or_init(|| std::sync::Mutex::new(std::collections::HashSet::new()))
+}
+
+/// 標記某 item 在跑完目前這一輪 tool-calling 之後暫停執行。
+#[tauri::command]
+#[allow(non_snake_case)]
+fn request_pause_agent(itemId: u32) {
+    if let Ok(mut set) = pause_requests().lock() {
+        set.insert(itemId);
+    }
+}
+
+/// 取消尚未生效的暫停請求（例如使用者按了暫停又立刻反悔）。
+#[tauri::command]
+#[allow(non_snake_case)]
+fn cancel_pause_request(itemId: u32) {
+    if let Ok(mut set) = pause_requests().lock() {
+        set.remove(&itemId);
+    }
+}
+
 /// 將 var_name 視為環境變數名稱，讀取對應的值。
 fn resolve_env_key(var_name: &str) -> String {
     let trimmed = var_name.trim();
@@ -281,6 +304,12 @@ struct AgentExecutionRequest {
     #[serde(default = "default_max_rounds")]
     #[serde(rename = "maxRounds")]
     max_rounds: u32,
+    /// 從暫停狀態繼續執行時，帶回上次中斷點累積的完整對話訊息（含 tool 呼叫/結果）。
+    #[serde(default, rename = "resumeMessages")]
+    resume_messages: Option<Vec<Value>>,
+    /// 從暫停狀態繼續執行時，帶回上次中斷時已完成的輪數，接續編號。
+    #[serde(default, rename = "resumeRound")]
+    resume_round: Option<u32>,
 }
 
 #[derive(Debug, Serialize)]
@@ -297,6 +326,11 @@ struct AgentExecutionResult {
     content: String,
     stats: Option<Value>,
     tool_calls: Vec<ToolExecutionLog>,
+    #[serde(default)]
+    paused: bool,
+    /// 暫停時的完整對話狀態（messages + roundIndex），交給前端存檔，繼續執行時原封傳回。
+    #[serde(default, rename = "resumeState")]
+    resume_state: Option<Value>,
 }
 
 #[derive(Clone, Serialize)]
@@ -650,7 +684,6 @@ fn delete_skill(id: String) -> Result<(), String> {
     }
     Ok(())
 }
-
 
 fn load_skill_prompts(skills: &[String]) -> Vec<(String, String)> {
     let dir = skills_dir();
@@ -1036,9 +1069,9 @@ fn tool_workspace_root(configured_directory: &str) -> Result<PathBuf, String> {
 }
 
 fn ensure_inside_workspace(root: &Path, path: PathBuf) -> Result<PathBuf, String> {
-    let canonical = path
-        .canonicalize()
-        .map_err(|error| format!("路徑不存在或無法存取：{error}"))?;
+    let canonical = path.canonicalize().map_err(|error| {
+        format!("路徑不存在或無法存取：{error}\nnext_step: 請先用 list_directory 探索工作目錄結構，確認正確路徑後再重試。")
+    })?;
     if !canonical.starts_with(root) {
         return Err("拒絕存取工具工作目錄以外的路徑".to_string());
     }
@@ -1531,8 +1564,7 @@ impl SearchContentState {
     fn should_stop(&mut self, matches: &[Value]) -> bool {
         if matches.len() >= MAX_SEARCH_RESULTS
             || self.files_scanned >= MAX_SEARCH_FILES
-            || self.started_at.elapsed()
-                >= std::time::Duration::from_millis(MAX_SEARCH_DURATION_MS)
+            || self.started_at.elapsed() >= std::time::Duration::from_millis(MAX_SEARCH_DURATION_MS)
         {
             self.truncated = matches.len() >= MAX_SEARCH_RESULTS
                 || self.files_scanned >= MAX_SEARCH_FILES
@@ -3018,42 +3050,47 @@ async fn execute_agent_with_tools(
     } else {
         vec![]
     };
-    let mut messages = Vec::new();
-    if has_user_prompt {
-        messages.push(serde_json::json!({ "role": "system", "content": request.prompt }));
-    }
-    for (_, skill_content) in &skill_prompts {
-        messages.push(serde_json::json!({ "role": "system", "content": skill_content }));
-    }
-    let now_line = {
-        let utc_now = chrono::Utc::now();
-        let system_tz_name = iana_time_zone::get_timezone().ok();
-        let (formatted, tz_label) = match system_tz_name
-            .as_deref()
-            .and_then(|n| n.parse::<chrono_tz::Tz>().ok())
-        {
-            Some(tz) => (
-                utc_now
-                    .with_timezone(&tz)
-                    .format("%Y-%m-%d %H:%M:%S %z")
-                    .to_string(),
-                system_tz_name.unwrap(),
-            ),
-            None => {
-                let local = chrono::Local::now();
-                (
-                    local.format("%Y-%m-%d %H:%M:%S %z").to_string(),
-                    format!("system local ({})", local.offset()),
-                )
-            }
-        };
-        format!("Now: {formatted} ({tz_label}).")
+    let mut messages = if let Some(resumed) = request.resume_messages.clone() {
+        resumed
+    } else {
+        Vec::new()
     };
-    let workspace_line = format!(
-        "Workspace: {}. Use relative paths or absolute paths under it only.",
-        workspace_root.display()
-    );
-    messages.push(serde_json::json!({
+    if request.resume_messages.is_none() {
+        if has_user_prompt {
+            messages.push(serde_json::json!({ "role": "system", "content": request.prompt }));
+        }
+        for (_, skill_content) in &skill_prompts {
+            messages.push(serde_json::json!({ "role": "system", "content": skill_content }));
+        }
+        let now_line = {
+            let utc_now = chrono::Utc::now();
+            let system_tz_name = iana_time_zone::get_timezone().ok();
+            let (formatted, tz_label) = match system_tz_name
+                .as_deref()
+                .and_then(|n| n.parse::<chrono_tz::Tz>().ok())
+            {
+                Some(tz) => (
+                    utc_now
+                        .with_timezone(&tz)
+                        .format("%Y-%m-%d %H:%M:%S %z")
+                        .to_string(),
+                    system_tz_name.unwrap(),
+                ),
+                None => {
+                    let local = chrono::Local::now();
+                    (
+                        local.format("%Y-%m-%d %H:%M:%S %z").to_string(),
+                        format!("system local ({})", local.offset()),
+                    )
+                }
+            };
+            format!("Now: {formatted} ({tz_label}).")
+        };
+        let workspace_line = format!(
+            "Workspace: {}. Use relative paths or absolute paths under it only.",
+            workspace_root.display()
+        );
+        messages.push(serde_json::json!({
         "role": "system",
         "content": format!(
             "You are a tool-using coding agent.\n\
@@ -3062,11 +3099,13 @@ async fn execute_agent_with_tools(
 For build/run/test/execute/fix/verify requests, actually use tools unless the user asks only for instructions.\n\
 Known scripts/commands such as build.bat: run directly with execute_command from workspace root; do not use search_content to find filenames.\n\
 For long builds, set timeout_seconds 1800-7200.\n\
-Follow tool next_step. When the requested task succeeds, stop calling tools and give the final result."
+Follow tool next_step. When the requested task succeeds, stop calling tools and give the final result.
+When a tool fails because a path does not exist: use list_directory to explore the workspace structure first, then retry with the correct path. Never give up after a single path error — explore, find the correct path, and retry. If the user mentions a directory name, check whether it exists under the workspace root or use list_directory with path \".\" to see top-level entries."
         )
     }));
-    messages.extend(memory_history.iter().cloned());
-    messages.push(serde_json::json!({ "role": "user", "content": input }));
+        messages.extend(memory_history.iter().cloned());
+        messages.push(serde_json::json!({ "role": "user", "content": input }));
+    }
 
     let client = reqwest::Client::builder()
         .connect_timeout(std::time::Duration::from_secs(10))
@@ -3079,7 +3118,7 @@ Follow tool next_step. When the requested task succeeds, stop calling tools and 
     // Start with "required" and fall back to "auto" if the API rejects it.
     let mut tool_choice_required = true;
     let max_iterations = request.max_rounds as usize;
-    let mut round_index = 0usize;
+    let mut round_index = request.resume_round.unwrap_or(0) as usize;
     while round_index < max_iterations {
         let round = round_index + 1;
         let tool_choice = if execution_logs.is_empty() && tool_choice_required && round == 1 {
@@ -3260,6 +3299,8 @@ Follow tool next_step. When the requested task succeeds, stop calling tools and 
                     },
                     stats: latest_stats,
                     tool_calls: execution_logs,
+                    paused: false,
+                    resume_state: None,
                 });
             } else {
                 println!(">>> execute_agent_with_tools: tool_calls is empty, but pending user messages exist! Continuing conversation loop.");
@@ -3430,6 +3471,25 @@ Follow tool next_step. When the requested task succeeds, stop calling tools and 
             }));
         }
         round_index += 1;
+
+        // 等這一輪（含工具呼叫）完全跑完才檢查暫停請求，確保不會中斷一半的模型回應或工具執行。
+        let pause_requested = pause_requests()
+            .lock()
+            .map(|mut set| set.remove(&request.item_id))
+            .unwrap_or(false);
+        if pause_requested {
+            return Ok(AgentExecutionResult {
+                endpoint,
+                content: String::new(),
+                stats: None,
+                tool_calls: execution_logs,
+                paused: true,
+                resume_state: Some(serde_json::json!({
+                    "messages": messages,
+                    "roundIndex": round_index,
+                })),
+            });
+        }
     }
 
     Err(format!("工具呼叫超過 {max_iterations} 輪，已停止執行"))
@@ -3442,6 +3502,9 @@ async fn execute_agent(
 ) -> Result<AgentExecutionResult, String> {
     if let Ok(mut map) = pending_agent_messages().lock() {
         map.remove(&request.item_id);
+    }
+    if let Ok(mut set) = pause_requests().lock() {
+        set.remove(&request.item_id);
     }
     let mut request = request;
     request.api_key = resolve_env_key(&request.api_key);
@@ -3656,6 +3719,8 @@ async fn execute_agent(
             .cloned()
             .or_else(|| json.get("usage").cloned()),
         tool_calls: Vec::new(),
+        paused: false,
+        resume_state: None,
     })
 }
 
@@ -4216,12 +4281,14 @@ mod tests {
 
     #[test]
     fn get_input_parses_tools_parameter() {
-        let input_comma = parse_get_input("/input?agent=test&tools=read_file,execute_command").unwrap();
+        let input_comma =
+            parse_get_input("/input?agent=test&tools=read_file,execute_command").unwrap();
         assert_eq!(input_comma.tools, vec!["read_file", "execute_command"]);
 
         // Since parse_get_input iterates and parameters.get_mut treats subsequent items as parameter override/array,
         // multiple "tools" query params will populate tools twice.
-        let input_multi = parse_get_input("/input?agent=test&tools=read_file&tools=execute_command").unwrap();
+        let input_multi =
+            parse_get_input("/input?agent=test&tools=read_file&tools=execute_command").unwrap();
         assert_eq!(input_multi.tools, vec!["read_file", "execute_command"]);
     }
 
@@ -4449,7 +4516,9 @@ pub fn run() {
             delete_skill,
             list_mcp_server_tools,
             update_agent_status,
-            send_agent_message
+            send_agent_message,
+            request_pause_agent,
+            cancel_pause_request
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
