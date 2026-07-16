@@ -561,6 +561,80 @@ fn skills_dir() -> PathBuf {
         .join("skills")
 }
 
+fn default_builtin_agent_instruction() -> String {
+    "You are a tool-using coding agent.\n\
+{now_line}\n\
+{workspace_line}\n\
+For build/run/test/execute/fix/verify requests, actually use tools unless the user asks only for instructions.\n\
+Known scripts/commands such as build.bat: run directly with execute_command from workspace root; do not use search_content to find filenames.\n\
+For long builds, set timeout_seconds 1800-7200.\n\
+Follow tool next_step. When the requested task succeeds, stop calling tools and give the final result.\n\
+When a tool fails because a path does not exist: use list_directory to explore the workspace structure first, then retry with the correct path. Never give up after a single path error — explore, find the correct path, and retry. If the user mentions a directory name, check whether it exists under the workspace root or use list_directory with path \".\" to see top-level entries."
+        .to_string()
+}
+
+/// 內建系統提示詞設定（從 system_prompt.json 載入）。目前只有一個內建 agent 指令範本，
+/// 其中 {now_line} / {workspace_line} 是執行時才知道的動態內容，用字串取代注入。
+#[derive(Debug, Clone, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct SystemPromptConfig {
+    #[serde(default = "default_builtin_agent_instruction")]
+    builtin_agent_instruction: String,
+}
+
+impl Default for SystemPromptConfig {
+    fn default() -> Self {
+        SystemPromptConfig {
+            builtin_agent_instruction: default_builtin_agent_instruction(),
+        }
+    }
+}
+
+fn system_prompt_path() -> PathBuf {
+    if cfg!(debug_assertions) {
+        // Dev: repo root（與 release 時「exe 旁邊」的位置一致，方便直接編輯）。
+        let manifest = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+        return manifest
+            .ancestors()
+            .nth(2)
+            .map(|p| p.to_path_buf())
+            .unwrap_or(manifest)
+            .join("system_prompt.json");
+    }
+    // Release: next to the installed executable.
+    std::env::current_exe()
+        .ok()
+        .and_then(|p| p.parent().map(|p| p.to_path_buf()))
+        .unwrap_or_else(|| PathBuf::from("."))
+        .join("system_prompt.json")
+}
+
+fn load_system_prompt_config() -> SystemPromptConfig {
+    let path = system_prompt_path();
+    match fs::read_to_string(&path) {
+        Ok(content) => match serde_json::from_str::<SystemPromptConfig>(&content) {
+            Ok(config) => {
+                println!("已載入 system prompt 設定：{}", path.display());
+                config
+            }
+            Err(error) => {
+                eprintln!("system_prompt.json 格式錯誤，改用內建預設值：{error}");
+                SystemPromptConfig::default()
+            }
+        },
+        Err(_) => {
+            println!("找不到 {}，使用內建預設 system prompt", path.display());
+            SystemPromptConfig::default()
+        }
+    }
+}
+
+/// App 啟動時載入一次並快取；之後每輪對話都重複使用同一份設定。
+fn system_prompt_config() -> &'static SystemPromptConfig {
+    static INSTANCE: std::sync::OnceLock<SystemPromptConfig> = std::sync::OnceLock::new();
+    INSTANCE.get_or_init(load_system_prompt_config)
+}
+
 #[derive(Debug, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct SkillMeta {
@@ -3090,19 +3164,14 @@ async fn execute_agent_with_tools(
             "Workspace: {}. Use relative paths or absolute paths under it only.",
             workspace_root.display()
         );
+        let builtin_instruction = system_prompt_config()
+            .builtin_agent_instruction
+            .replace("{now_line}", &now_line)
+            .replace("{workspace_line}", &workspace_line);
         messages.push(serde_json::json!({
-        "role": "system",
-        "content": format!(
-            "You are a tool-using coding agent.\n\
-{now_line}\n\
-{workspace_line}\n\
-For build/run/test/execute/fix/verify requests, actually use tools unless the user asks only for instructions.\n\
-Known scripts/commands such as build.bat: run directly with execute_command from workspace root; do not use search_content to find filenames.\n\
-For long builds, set timeout_seconds 1800-7200.\n\
-Follow tool next_step. When the requested task succeeds, stop calling tools and give the final result.
-When a tool fails because a path does not exist: use list_directory to explore the workspace structure first, then retry with the correct path. Never give up after a single path error — explore, find the correct path, and retry. If the user mentions a directory name, check whether it exists under the workspace root or use list_directory with path \".\" to see top-level entries."
-        )
-    }));
+            "role": "system",
+            "content": builtin_instruction
+        }));
         messages.extend(memory_history.iter().cloned());
         messages.push(serde_json::json!({ "role": "user", "content": input }));
     }
@@ -4490,6 +4559,7 @@ pub fn run() {
         .plugin(tauri_plugin_dialog::init())
         .manage(input_queue.clone())
         .setup(|app| {
+            system_prompt_config(); // 啟動時載入並快取 system_prompt.json（首次呼叫觸發讀檔）
             if cfg!(debug_assertions) {
                 if let Err(err) = app.handle().plugin(
                     tauri_plugin_log::Builder::default()
