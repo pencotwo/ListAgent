@@ -153,10 +153,6 @@
               <button id="btn-fetch-mcp-tools" class="btn btn-small" type="button">🔌 取得 MCP 工具</button>
             </div>
             <p class="tool-hint">只有勾選的工具會提供給 AI；所有檔案操作都限制在設定的工作目錄內。</p>
-            <label class="tool-option">
-              <input type="checkbox" id="input-tools-search" />
-              tools search（勾選後，初始不帶工具給 AI，AI 需先呼叫 <code>tools_search</code> 搜出需要的工具，才會在後續 round 加入該工具）
-            </label>
           </fieldset>
 
           <fieldset class="memory-group">
@@ -226,31 +222,8 @@
             </div>
           </fieldset>
 
-          <fieldset class="embedding-group">
-            <legend>Embedding 設定 (用於向量搜尋 tools)</legend>
-            <p class="tool-hint">🔍 <b>向量搜尋 tools</b>（tools_search 開啟時生效）：填入 embedding API 三個欄位後，會用向量搜尋從使用者任務挑最相關的 top-5 工具，預先解鎖進 tools[] payload，AI 少一輪 tools_search。三欄任一為空則跳過。</p>
-            <div class="row" style="display:flex; gap:12px; margin-bottom:12px;">
-              <div class="field" style="flex:1;">
-                <label class="form-label" for="input-global-embedding-base-url">Embedding API Base URL</label>
-                <input id="input-global-embedding-base-url" class="form-input" type="text" placeholder="例如：http://localhost:11434/v1" />
-              </div>
-            </div>
-            <div class="row" style="display:flex; gap:12px; margin-bottom:12px;">
-              <div class="field" style="flex:1;">
-                <label class="form-label" for="input-global-embedding-api-key">Embedding API Key 環境變數</label>
-                <input id="input-global-embedding-api-key" class="form-input" type="text" placeholder="例如 OPENAI_API_KEY（選填）" autocomplete="off" />
-              </div>
-            </div>
-            <div class="row" style="display:flex; gap:12px;">
-              <div class="field" style="flex:1;">
-                <label class="form-label" for="input-global-embedding-model">Embedding Model</label>
-                <input id="input-global-embedding-model" class="form-input" type="text" placeholder="例如：text-embedding-3-small" />
-              </div>
-            </div>
-          </fieldset>
-
           <fieldset class="skills-management-group">
-            <legend>🤖 Skills 範本管理</legend>
+            <legend>🤖 SKILLS 範本管理</legend>
             <p class="tool-hint">在此新增、編輯或刪除全域的 Skill 範本（檔案儲存在 skills/ 目錄下）。</p>
             <div id="settings-skills-list" class="settings-skills-list"></div>
             <div style="margin-top: 10px;">
@@ -368,8 +341,8 @@
             <textarea id="input-skill-description" class="form-input" rows="2" placeholder="簡短描述此 Skill 的用途..."></textarea>
           </div>
           <div class="field">
-            <label class="form-label" for="input-skill-prompt">System Prompt</label>
-            <textarea id="input-skill-prompt" class="form-input" rows="8" style="font-family: monospace;" placeholder="輸入給 AI 的 Skill 指令或工作流程..."></textarea>
+            <label class="form-label" for="input-skill-prompt">PROMPT</label>
+            <textarea id="input-skill-prompt" class="form-input" rows="20" style="font-family: monospace;" placeholder="輸入給 AI 的 Skill 指令或工作流程..."></textarea>
           </div>
         </div>
 

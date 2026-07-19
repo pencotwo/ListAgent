@@ -1345,7 +1345,7 @@ body.theme-glass-neon #list-container.card-layout .item-card.selected {
 /* Skills fieldset */
 .font-size-group,
 .skill-group,
-.embedding-group {
+.skills-management-group {
   min-width: 0;
   margin: 0;
   padding: 12px;
@@ -1356,7 +1356,7 @@ body.theme-glass-neon #list-container.card-layout .item-card.selected {
 
 .font-size-group legend,
 .skill-group legend,
-.embedding-group legend {
+.skills-management-group legend {
   padding: 0 8px;
   color: var(--text-secondary);
   font-size: 13px;

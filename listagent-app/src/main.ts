@@ -19,9 +19,6 @@ interface SettingsFile {
   events: ScheduledEvent[]
   enableHttpInput?: boolean
   eventMappings?: EventMapping[]
-  embeddingApiBaseUrl?: string
-  embeddingApiKey?: string
-  embeddingModel?: string
 }
 
 interface SkillMeta {
@@ -57,10 +54,6 @@ interface ListItem {
   mcpTools: string[]
   memory: boolean
   allowHttp: boolean
-  toolsSearch: boolean
-  embeddingApiBaseUrl: string
-  embeddingApiKey: string
-  embeddingModel: string
   maxRounds: number
 }
 
@@ -113,14 +106,14 @@ interface PausedTaskInfo {
 interface ModelExchangeEvent {
   itemId: number
   round: number
-  phase: 'request' | 'response' | 'tool' | 'error' | 'vector_search' | 'user_input' | 'command_output'
+  phase: 'request' | 'response' | 'tool' | 'error' | 'user_input' | 'command_output'
   endpoint: string
   payload: unknown
 }
 
 interface SessionExchange {
   round: number
-  phase: 'request' | 'response' | 'tool' | 'error' | 'vector_search' | 'user_input' | 'command_output'
+  phase: 'request' | 'response' | 'tool' | 'error' | 'user_input' | 'command_output'
   endpoint: string
   payload: unknown
   timestamp: number
@@ -221,10 +214,6 @@ function hydrateItems(storedItems: PersistedListItem[]): ListItem[] {
     mcpTools: Array.isArray(item.mcpTools) ? item.mcpTools : [],
     memory: typeof item.memory === 'boolean' ? item.memory : false,
     allowHttp: typeof item.allowHttp === 'boolean' ? item.allowHttp : false,
-    toolsSearch: typeof item.toolsSearch === 'boolean' ? item.toolsSearch : false,
-    embeddingApiBaseUrl: typeof item.embeddingApiBaseUrl === 'string' ? item.embeddingApiBaseUrl : '',
-    embeddingApiKey: typeof item.embeddingApiKey === 'string' ? item.embeddingApiKey : '',
-    embeddingModel: typeof item.embeddingModel === 'string' ? item.embeddingModel : '',
     maxRounds: typeof item.maxRounds === 'number' && item.maxRounds > 0 ? item.maxRounds : 100,
   }))
 }
@@ -245,10 +234,6 @@ function getPersistedItems(): PersistedListItem[] {
     mcpTools: item.mcpTools,
     memory: item.memory,
     allowHttp: item.allowHttp,
-    toolsSearch: item.toolsSearch,
-    embeddingApiBaseUrl: item.embeddingApiBaseUrl,
-    embeddingApiKey: item.embeddingApiKey,
-    embeddingModel: item.embeddingModel,
     maxRounds: item.maxRounds,
   }))
 }
@@ -322,6 +307,9 @@ const runningItems = new Set<number>()
 
 /** 已暫停、可按「繼續」接續執行的 item（跨 App 重啟也會從 session 檔還原） */
 const pausedTasks = new Map<number, PausedTaskInfo>()
+
+/** 壓縮後等待下一次使用者輸入承接的上下文（id → OpenAI messages） */
+const compactedContexts: Map<number, unknown[]> = new Map()
 
 /** 已送出暫停請求、正等待目前 round 跑完生效的 item */
 const pausingItems = new Set<number>()
@@ -458,7 +446,6 @@ function recordModelExchange(exchange: ModelExchangeEvent): void {
     response: '← AI Model 回應',
     tool: '⚙ Tool 執行',
     error: '✖ AI Model 錯誤',
-    vector_search: '🔍 向量搜尋 tools',
     user_input: '💬 使用者插話',
     command_output: '🖥 Command 輸出',
   } as const
@@ -467,7 +454,6 @@ function recordModelExchange(exchange: ModelExchangeEvent): void {
     response: 'success',
     tool: 'system',
     error: 'error',
-    vector_search: 'system',
     user_input: 'info',
     command_output: 'system',
   }
@@ -623,11 +609,7 @@ const inputWorkingDirectory = document.getElementById('input-working-directory')
 const btnSelectWorkingDirectory = document.getElementById('btn-select-working-directory') as HTMLButtonElement
 const toolCheckboxes = Array.from(document.querySelectorAll<HTMLInputElement>('input[name="agent-tool"]'))
 const inputMemory = document.getElementById('input-memory') as HTMLInputElement
-const inputToolsSearch = document.getElementById('input-tools-search') as HTMLInputElement
 const inputMaxRounds = document.getElementById('input-max-rounds') as HTMLInputElement
-const inputEmbeddingBaseUrl = document.getElementById('input-global-embedding-base-url') as HTMLInputElement
-const inputEmbeddingApiKey = document.getElementById('input-global-embedding-api-key') as HTMLInputElement
-const inputEmbeddingModel = document.getElementById('input-global-embedding-model') as HTMLInputElement
 const skillListEl = document.getElementById('skill-list') as HTMLElement
 const selectPreset = document.getElementById('select-preset') as HTMLSelectElement
 const btnSavePreset = document.getElementById('btn-save-preset') as HTMLButtonElement
@@ -662,9 +644,6 @@ const inputSkillPrompt = document.getElementById('input-skill-prompt') as HTMLTe
 
 let editingSkillId: string | null = null
 
-let globalEmbeddingApiBaseUrl = ''
-let globalEmbeddingApiKey = ''
-let globalEmbeddingModel = ''
 let execFontSize = 13
 
 // 排程事件視窗元素
@@ -1315,10 +1294,6 @@ async function runItem(id: number, parameters?: unknown, execId?: string, overri
         selectedMcpTools: item.mcpTools,
         memory: item.memory,
         itemCode: item.code,
-        toolsSearch: item.toolsSearch,
-        embeddingApiBaseUrl: globalEmbeddingApiBaseUrl,
-        embeddingApiKey: globalEmbeddingApiKey,
-        embeddingModel: globalEmbeddingModel,
         resumeMessages: resumeState?.messages,
         resumeRound: resumeState?.round,
       },
@@ -1393,28 +1368,31 @@ async function runItem(id: number, parameters?: unknown, execId?: string, overri
     const queue = itemTaskQueues.get(id)
     const nextTask = queue?.shift()
     if (queue && queue.length === 0) itemTaskQueues.delete(id)
-    // 立即同步狀態到 Rust，讓 HTTP action=get_status 能查到最新狀態。
-    // 這行放在後面的 UI 更新/saveSession 之前，避免那些操作意外拋錯導致狀態未同步。
-    syncAgentStatus()
-    updateCardRunButton(id, false)
-    if (selectedItemId === id && viewingSessionData === null) renderMessageBox(id)
 
+    // 先把 session 存檔完成、把路徑補進 lastTaskByAgent，再同步狀態到 Rust。
+    // 兩者都內建 try/catch 不會往外拋，所以不會擋住後面一定會執行的 syncAgentStatus()。
+    // （原本是「先同步一次再非同步存檔、存完再補同步一次」，但外部輪詢者
+    // 例如 AgentTester 只看第一次就判定「已結束」的那次快照——如果剛好夾在
+    // 兩次同步中間送出請求，就會拿到一個沒有 lastSessionUrl 的 detail，
+    // 導致 session.exchanges 是 undefined，check 表達式直接拋例外而非乾淨的
+    // assertion failed。改成同步前先 await 存檔，讓「已結束」與「session 已可查」
+    // 這兩件事對外永遠是同一個原子快照。）
     if (taskPaused) {
       // 存檔暫停狀態（含完整對話與繼續執行所需參數），讓即使關閉 App 也能從此處接續。
       const pausedInfo = pausedTasks.get(id)
-      if (pausedInfo) void savePausedSession(item, pausedInfo)
+      if (pausedInfo) await savePausedSession(item, pausedInfo)
     } else {
-      // 儲存本次 session，並把路徑補進 lastTaskByAgent，讓 status 能提供 session link
-      void saveCurrentSession(item).then((savedPath) => {
-        if (savedPath) {
-          const info = lastTaskByAgent.get(item.name) ?? {}
-          info.lastSessionPath = savedPath
-          info.lastSessionUrl = `http://127.0.0.1:37123/session_file?path=${encodeURIComponent(savedPath)}`
-          lastTaskByAgent.set(item.name, info)
-          syncAgentStatus()  // 再同步一次，讓 status 帶到 sessionPath / sessionUrl
-        }
-      })
+      const savedPath = await saveCurrentSession(item)
+      if (savedPath) {
+        const info = lastTaskByAgent.get(item.name) ?? {}
+        info.lastSessionPath = savedPath
+        info.lastSessionUrl = `http://127.0.0.1:37123/session_file?path=${encodeURIComponent(savedPath)}`
+        lastTaskByAgent.set(item.name, info)
+      }
     }
+    syncAgentStatus()
+    updateCardRunButton(id, false)
+    if (selectedItemId === id && viewingSessionData === null) renderMessageBox(id)
     if (nextTask) {
       logs.push({
         level: 'system',
@@ -1453,9 +1431,9 @@ async function drainHttpInputs(): Promise<void> {
 }
 
 /** 更新卡片上的執行狀態 */
-/** 此 item 是否會跑多輪 tool-calling（有工具／MCP／tools_search）——只有這種才有「暫停」的意義 */
+/** 此 item 是否會跑多輪 tool-calling（有工具／MCP）——只有這種才有「暫停」的意義 */
 function isPauseEligible(item: ListItem): boolean {
-  return item.tools.length > 0 || item.mcpServers.some((s) => s.enabled) || item.toolsSearch
+  return item.tools.length > 0 || item.mcpServers.some((s) => s.enabled)
 }
 
 function pauseButtonState(item: ListItem): 'hidden' | 'pause' | 'pausing' | 'resume' {
@@ -2115,44 +2093,6 @@ function makeSimpleExchangeEntry(
       const message = (p.message as string) ?? String(payload)
       return { level: 'error', message: `✖ AI 模型錯誤：${message}`, timestamp, kind: 'simple' }
     }
-    case 'vector_search': {
-      const sub = p.phase as string | undefined
-      if (sub === 'start') {
-        return {
-          level: 'system',
-          message: `🔍 向量搜尋 tools 開始：model=${p.model}，候選 ${p.candidate_count} 個 tools`,
-          timestamp,
-          kind: 'simple',
-        }
-      }
-      if (sub === 'result') {
-        const unlocked = (p.unlocked as Array<Record<string, unknown>>) ?? []
-        const ranking = (p.ranking as Array<Record<string, unknown>>) ?? []
-        const topLines = unlocked.map((u) => {
-          const flag = u.already_unlocked ? '（已解鎖）' : '（新解鎖）'
-          return `    ✓ ${u.name}  score=${Number(u.score).toFixed(3)} ${flag}`
-        }).join('\n')
-        const restLines = ranking.slice(unlocked.length, unlocked.length + 4).map((r) =>
-          `    · ${r.name}  score=${Number(r.score).toFixed(3)}`
-        ).join('\n')
-        const restBlock = restLines ? `\n  其餘排名（未解鎖）：\n${restLines}` : ''
-        return {
-          level: 'system',
-          message: `🔍 向量搜尋 tools 完成（維度 ${p.embedding_dim}）：\n  Top-${p.top_k} 已進 tools[]：\n${topLines}${restBlock}`,
-          timestamp,
-          kind: 'simple',
-        }
-      }
-      if (sub === 'error') {
-        return {
-          level: 'error',
-          message: `🔍 向量搜尋 tools 失敗（略過，退回原本 tools_search 模式）：${p.error}`,
-          timestamp,
-          kind: 'simple',
-        }
-      }
-      return null
-    }
     default:
       return null
   }
@@ -2461,7 +2401,6 @@ function renderSessionViewInPanel(session: SessionData): void {
     response: '← AI Model 回應',
     tool: '⚙ Tool 執行',
     error: '✖ AI Model 錯誤',
-    vector_search: '🔍 向量搜尋 tools',
     user_input: '💬 使用者插話',
     command_output: '🖥 Command 輸出',
   }
@@ -2470,7 +2409,6 @@ function renderSessionViewInPanel(session: SessionData): void {
     response: 'success',
     tool: 'system',
     error: 'error',
-    vector_search: 'system',
     user_input: 'info',
     command_output: 'system',
   }
@@ -3399,7 +3337,6 @@ async function openSettingsDialog(itemId: number): Promise<void> {
     checkbox.checked = item.tools.includes(checkbox.value as ToolName)
   })
   inputMemory.checked = item.memory
-  inputToolsSearch.checked = item.toolsSearch
   inputMaxRounds.value = String(item.maxRounds)
 
   settingsOverlay.classList.remove('hidden')
@@ -3429,30 +3366,8 @@ function closeSettingsDialog(): void {
 
 /** 載入全域設定 */
 async function loadGlobalSettings(): Promise<void> {
-  if (isTauri()) {
-    try {
-      const settings: SettingsFile = await invoke('read_settings')
-      globalEmbeddingApiBaseUrl = settings.embeddingApiBaseUrl || ''
-      globalEmbeddingApiKey = settings.embeddingApiKey || ''
-      globalEmbeddingModel = settings.embeddingModel || ''
-    } catch { /* fallback */ }
-  }
-  if (!globalEmbeddingApiBaseUrl) {
-    globalEmbeddingApiBaseUrl = localStorage.getItem('global_embedding_base_url') || ''
-  }
-  if (!globalEmbeddingApiKey) {
-    globalEmbeddingApiKey = localStorage.getItem('global_embedding_api_key') || ''
-  }
-  if (!globalEmbeddingModel) {
-    globalEmbeddingModel = localStorage.getItem('global_embedding_model') || ''
-  }
-
   execFontSize = parseInt(localStorage.getItem('exec_font_size') || '13', 10)
   applyFontSizes()
-
-  inputEmbeddingBaseUrl.value = globalEmbeddingApiBaseUrl
-  inputEmbeddingApiKey.value = globalEmbeddingApiKey
-  inputEmbeddingModel.value = globalEmbeddingModel
 }
 
 /** 套用字體大小 CSS 變數 */
@@ -3463,21 +3378,11 @@ function applyFontSizes(): void {
 
 /** 儲存全域設定 */
 async function saveGlobalSettings(): Promise<void> {
-  globalEmbeddingApiBaseUrl = inputEmbeddingBaseUrl.value.trim()
-  globalEmbeddingApiKey = inputEmbeddingApiKey.value
-  globalEmbeddingModel = inputEmbeddingModel.value.trim()
-
-  localStorage.setItem('global_embedding_base_url', globalEmbeddingApiBaseUrl)
-  localStorage.setItem('global_embedding_api_key', globalEmbeddingApiKey)
-  localStorage.setItem('global_embedding_model', globalEmbeddingModel)
   localStorage.setItem('exec_font_size', String(execFontSize))
 
   if (isTauri()) {
     try {
       const settings: SettingsFile = await invoke('read_settings')
-      settings.embeddingApiBaseUrl = globalEmbeddingApiBaseUrl
-      settings.embeddingApiKey = globalEmbeddingApiKey
-      settings.embeddingModel = globalEmbeddingModel
       settings.enableHttpInput = true
       await invoke('write_settings', { settings })
     } catch (e) {
@@ -3488,9 +3393,6 @@ async function saveGlobalSettings(): Promise<void> {
 
 /** 開啟全域設定對話框 */
 function openGlobalSettings(): void {
-  inputEmbeddingBaseUrl.value = globalEmbeddingApiBaseUrl
-  inputEmbeddingApiKey.value = globalEmbeddingApiKey
-  inputEmbeddingModel.value = globalEmbeddingModel
   applyFontSizes()
   globalSettingsOverlay.classList.remove('hidden')
   void loadAndRenderSettingsSkills()
@@ -3557,7 +3459,7 @@ async function openSkillEditor(id: string | null): Promise<void> {
     inputSkillDescription.value = ''
     inputSkillPrompt.value = ''
   } else {
-    skillEditorTitle.textContent = '✏️ 編輯 Skill'
+    skillEditorTitle.textContent = '✏️ 編輯 SKILL'
     inputSkillId.value = id
     inputSkillId.disabled = true
     
@@ -3765,7 +3667,6 @@ async function saveSettings(): Promise<void> {
       return parts.length >= 2 && existingServerNames.includes(parts[0])
     })
     item.memory = inputMemory.checked
-    item.toolsSearch = inputToolsSearch.checked
     const rounds = parseInt(inputMaxRounds.value, 10)
     item.maxRounds = Number.isFinite(rounds) && rounds > 0 ? rounds : 100
   }
@@ -3783,12 +3684,174 @@ async function saveSettings(): Promise<void> {
 // ============================================================
 
 /** 發送使用者訊息給選中的 Agent */
+async function createAgent(selectAfterCreate = false): Promise<ListItem> {
+  const newId = nextId++
+  const newItem: ListItem = {
+    id: newId,
+    code: itemCodeFromId(newId),
+    agentId: generateAgentId(),
+    name: generateDefaultItemName(),
+    prompt: '',
+    apiBaseUrl: '',
+    apiKey: '',
+    modelName: '',
+    workingDirectory: '',
+    tools: [],
+    skills: [],
+    mcpServers: [],
+    mcpTools: [],
+    memory: false,
+    allowHttp: false,
+    maxRounds: 100,
+  }
+  items.push(newItem)
+  await saveItems()
+  renderList()
+  if (selectAfterCreate) selectItem(newItem.id)
+  return newItem
+}
+
+function resetLiveSessionState(item: ListItem): void {
+  const timer = currentSessionFlushTimers.get(item.id)
+  if (timer !== undefined) window.clearTimeout(timer)
+  currentSessionFlushTimers.delete(item.id)
+  currentSessionIds.delete(item.id)
+  currentSessionFilenames.delete(item.id)
+  currentSessionSavedPaths.delete(item.id)
+  currentSessionWriteChains.delete(item.id)
+  currentSessionStartedAt.set(item.id, Date.now())
+  currentSessionExchanges.set(item.id, [])
+  itemLogs.set(item.id, [])
+}
+
+function responseContentFromExchange(exchange: SessionExchange): string {
+  const payload = exchange.payload as any
+  return String(payload?.body?.choices?.[0]?.message?.content ?? payload?.raw ?? '')
+}
+
+function requestUserContentFromExchange(exchange: SessionExchange): string {
+  const payload = exchange.payload as any
+  const messages = Array.isArray(payload?.messages) ? payload.messages : []
+  const userMessage = [...messages].reverse().find((message: any) => message?.role === 'user')
+  return String(userMessage?.content ?? payload?.input ?? '')
+}
+
+function buildCompactSummary(item: ListItem): string {
+  const exchanges = currentSessionExchanges.get(item.id) ?? []
+  const parts: string[] = []
+  exchanges.forEach((exchange) => {
+    if (exchange.phase === 'request') {
+      const content = requestUserContentFromExchange(exchange).trim()
+      if (content) parts.push(`User: ${content}`)
+    } else if (exchange.phase === 'response') {
+      const content = responseContentFromExchange(exchange).trim()
+      if (content) parts.push(`Assistant: ${content}`)
+    } else if (exchange.phase === 'user_input') {
+      const content = String((exchange.payload as any)?.content ?? '').trim()
+      if (content) parts.push(`User interruption: ${content}`)
+    } else if (exchange.phase === 'tool') {
+      const payload = exchange.payload as any
+      const name = String(payload?.name ?? 'tool')
+      const result = String(payload?.result ?? '').trim()
+      if (result) parts.push(`Tool ${name}: ${result}`)
+    }
+  })
+
+  const logs = itemLogs.get(item.id) ?? []
+  if (parts.length === 0) {
+    logs.forEach((entry) => {
+      if (entry.message.trim()) parts.push(entry.message.trim())
+    })
+  }
+
+  const raw = parts.join('\n\n')
+  const maxLength = 12000
+  return raw.length > maxLength
+    ? `${raw.slice(0, maxLength)}\n\n[Context compacted: older detail truncated.]`
+    : raw
+}
+
+async function startNewSessionForSelectedItem(): Promise<void> {
+  if (selectedItemId === null) return
+  const item = items.find((candidate) => candidate.id === selectedItemId)
+  if (!item) return
+  if (runningItems.has(item.id)) {
+    const logs = itemLogs.get(item.id) ?? []
+    logs.push({ level: 'warn', message: 'Agent 執行中，無法建立新 session。', timestamp: Date.now() })
+    itemLogs.set(item.id, logs)
+    renderMessageBox(item.id)
+    return
+  }
+
+  const hasCurrentSession =
+    (itemLogs.get(item.id)?.length ?? 0) > 0 || (currentSessionExchanges.get(item.id)?.length ?? 0) > 0
+  if (hasCurrentSession) await saveCurrentSession(item)
+  compactedContexts.delete(item.id)
+  pausedTasks.delete(item.id)
+  resetLiveSessionState(item)
+  viewingSessionData = null
+  viewingSessionPath = null
+  renderMessageBox(item.id)
+  await loadAndRenderSessions(item)
+}
+
+function compactContextForSelectedItem(): void {
+  if (selectedItemId === null) return
+  const item = items.find((candidate) => candidate.id === selectedItemId)
+  if (!item) return
+  if (runningItems.has(item.id)) {
+    const logs = itemLogs.get(item.id) ?? []
+    logs.push({ level: 'warn', message: 'Agent 執行中，請等目前回合結束後再壓縮上下文。', timestamp: Date.now() })
+    itemLogs.set(item.id, logs)
+    renderMessageBox(item.id)
+    return
+  }
+
+  const summary = buildCompactSummary(item).trim()
+  if (!summary) {
+    const logs = itemLogs.get(item.id) ?? []
+    logs.push({ level: 'warn', message: '目前沒有可壓縮的上下文。', timestamp: Date.now() })
+    itemLogs.set(item.id, logs)
+    renderMessageBox(item.id)
+    return
+  }
+
+  const messages: unknown[] = []
+  if (item.prompt.trim()) {
+    messages.push({ role: 'system', content: item.prompt })
+  }
+  messages.push({
+    role: 'system',
+    content: `The previous session context has been compacted. Continue from this summary and preserve the user's goals, decisions, constraints, and unresolved tasks.\n\n${summary}`,
+  })
+  compactedContexts.set(item.id, messages)
+  currentSessionExchanges.set(item.id, [])
+  itemLogs.set(item.id, [{
+    level: 'system',
+    message: `已壓縮上下文，下一次訊息會帶入摘要繼續。\n\n${summary}`,
+    timestamp: Date.now(),
+  }])
+  currentSessionStartedAt.set(item.id, Date.now())
+  renderMessageBox(item.id)
+  scheduleLiveSessionFlush(item, 100)
+}
+
 function sendMessageToAgent(): void {
   if (selectedItemId === null) return
   const val = agentUserInput.value.trim()
   if (!val) return
 
   agentUserInput.value = ''
+
+  if (val === '/new') {
+    void startNewSessionForSelectedItem()
+    return
+  }
+
+  if (val === '/compact') {
+    compactContextForSelectedItem()
+    return
+  }
 
   if (runningItems.has(selectedItemId)) {
     void invoke('send_agent_message', { itemId: selectedItemId, message: val })
@@ -3814,7 +3877,20 @@ function sendMessageToAgent(): void {
     if (item) scheduleLiveSessionFlush(item, 100)
     renderMessageBox(selectedItemId)
   } else {
-    void runItem(selectedItemId, val)
+    const compactedContext = compactedContexts.get(selectedItemId)
+    if (compactedContext) {
+      compactedContexts.delete(selectedItemId)
+      void runItem(
+        selectedItemId,
+        val,
+        undefined,
+        undefined,
+        undefined,
+        { messages: [...compactedContext, { role: 'user', content: val }], round: 0 }
+      )
+    } else {
+      void runItem(selectedItemId, val)
+    }
   }
 }
 
@@ -3829,33 +3905,8 @@ if (agentUserInput && btnSendMessage) {
 }
 
 /** 新增 Agent */
-btnAdd.addEventListener('click', async () => {
-  const newId = nextId++
-  const newItem: ListItem = {
-    id: newId,
-    code: itemCodeFromId(newId),
-    agentId: generateAgentId(),
-    name: generateDefaultItemName(),
-    prompt: '',
-    apiBaseUrl: '',
-    apiKey: '',
-    modelName: '',
-    workingDirectory: '',
-    tools: [],
-    skills: [],
-    mcpServers: [],
-    mcpTools: [],
-    memory: false,
-    allowHttp: false,
-    toolsSearch: false,
-    embeddingApiBaseUrl: '',
-    embeddingApiKey: '',
-    embeddingModel: '',
-    maxRounds: 100,
-  }
-  items.push(newItem)
-  await saveItems()
-  renderList()
+btnAdd.addEventListener('click', () => {
+  void createAgent()
 })
 
 /** 開啟事件設定 */

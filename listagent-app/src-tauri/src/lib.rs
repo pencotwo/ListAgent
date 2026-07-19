@@ -293,14 +293,6 @@ struct AgentExecutionRequest {
     memory: bool,
     #[serde(default)]
     item_code: String,
-    #[serde(default)]
-    tools_search: bool,
-    #[serde(default, rename = "embeddingApiBaseUrl")]
-    embedding_api_base_url: String,
-    #[serde(default, rename = "embeddingApiKey")]
-    embedding_api_key: String,
-    #[serde(default, rename = "embeddingModel")]
-    embedding_model: String,
     #[serde(default = "default_max_rounds")]
     #[serde(rename = "maxRounds")]
     max_rounds: u32,
@@ -374,6 +366,20 @@ fn emit_model_exchange_for_item(
     );
 }
 
+fn annotate_resumed_message_sources(messages: &mut [Value]) {
+    for message in messages {
+        let role = message.get("role").and_then(Value::as_str).unwrap_or("");
+        let source = match role {
+            "user" => "👤 使用者輸入",
+            "system" => "🗜 壓縮上下文",
+            "assistant" => "🗜 壓縮上下文",
+            "tool" => "🗜 壓縮上下文工具結果",
+            _ => "🗜 壓縮上下文",
+        };
+        message["_source"] = Value::String(source.to_string());
+    }
+}
+
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct ListItem {
     pub id: u32,
@@ -405,18 +411,6 @@ pub struct ListItem {
     #[serde(default)]
     #[serde(rename = "allowHttp")]
     pub allow_http: bool,
-    #[serde(default)]
-    #[serde(rename = "toolsSearch")]
-    pub tools_search: bool,
-    #[serde(default)]
-    #[serde(rename = "embeddingApiBaseUrl")]
-    pub embedding_api_base_url: String,
-    #[serde(default)]
-    #[serde(rename = "embeddingApiKey")]
-    pub embedding_api_key: String,
-    #[serde(default)]
-    #[serde(rename = "embeddingModel")]
-    pub embedding_model: String,
     #[serde(default = "default_max_rounds")]
     #[serde(rename = "maxRounds")]
     pub max_rounds: u32,
@@ -484,15 +478,6 @@ pub struct Settings {
     #[serde(default)]
     #[serde(rename = "eventMappings")]
     pub event_mappings: Vec<EventMapping>,
-    #[serde(default)]
-    #[serde(rename = "embeddingApiBaseUrl")]
-    pub embedding_api_base_url: String,
-    #[serde(default)]
-    #[serde(rename = "embeddingApiKey")]
-    pub embedding_api_key: String,
-    #[serde(default)]
-    #[serde(rename = "embeddingModel")]
-    pub embedding_model: String,
 }
 
 fn settings_path() -> PathBuf {
@@ -899,9 +884,6 @@ fn read_settings() -> Result<Settings, String> {
             events: vec![],
             enable_http_input: true,
             event_mappings: vec![],
-            embedding_api_base_url: "".to_string(),
-            embedding_api_key: "".to_string(),
-            embedding_model: "".to_string(),
         })
     }
 }
@@ -1179,6 +1161,15 @@ fn resolve_write_tool_path(root: &Path, raw_path: &str) -> Result<PathBuf, Strin
         .ok_or_else(|| "write_file 路徑缺少父目錄".to_string())?;
     ensure_inside_workspace(root, parent.to_path_buf())?;
     Ok(candidate)
+}
+
+fn is_dot_prefixed_dir(path: &Path, metadata: &fs::Metadata) -> bool {
+    metadata.is_dir()
+        && path
+            .file_name()
+            .and_then(|name| name.to_str())
+            .map(|name| name.starts_with('.'))
+            .unwrap_or(false)
 }
 
 fn required_string<'a>(arguments: &'a Value, name: &str) -> Result<&'a str, String> {
@@ -1665,6 +1656,9 @@ fn search_file_content(
         return;
     };
     if metadata.is_dir() {
+        if path != root && is_dot_prefixed_dir(path, &metadata) {
+            return;
+        }
         let Ok(entries) = fs::read_dir(path) else {
             return;
         };
@@ -1741,6 +1735,9 @@ fn execute_tool(
                     _ => continue,
                 };
                 let metadata = entry.metadata().map_err(|error| error.to_string())?;
+                if is_dot_prefixed_dir(&canonical, &metadata) {
+                    continue;
+                }
                 entries.push(serde_json::json!({
                     "name": entry.file_name().to_string_lossy(),
                     "path": relative_display(root, &canonical),
@@ -2529,82 +2526,6 @@ async fn perform_web_search(query: &str) -> Result<String, String> {
     Err("搜尋未傳回任何結果".to_string())
 }
 
-/// Call an OpenAI-compatible /v1/embeddings endpoint. `base_url` may already contain
-/// `/embeddings` or be a base like `https://api.openai.com/v1`; both are handled.
-async fn get_embeddings(
-    base_url: &str,
-    api_key: &str,
-    model: &str,
-    inputs: Vec<String>,
-) -> Result<(Vec<Vec<f32>>, Value, Value), String> {
-    let base = base_url.trim().trim_end_matches('/');
-    let endpoint = if base.ends_with("/embeddings") {
-        base.to_string()
-    } else {
-        format!("{base}/embeddings")
-    };
-    let client = reqwest::Client::builder()
-        .connect_timeout(std::time::Duration::from_secs(10))
-        .timeout(std::time::Duration::from_secs(60))
-        .build()
-        .map_err(|e| format!("無法建立 HTTP client：{e}"))?;
-    let body = serde_json::json!({ "model": model, "input": inputs });
-    let mut req = client.post(&endpoint).json(&body);
-    if !api_key.trim().is_empty() {
-        req = req.bearer_auth(api_key.trim());
-    }
-    let resp = req
-        .send()
-        .await
-        .map_err(|e| format!("embedding 請求失敗：{e}"))?;
-    let status = resp.status();
-    let text = resp
-        .text()
-        .await
-        .map_err(|e| format!("讀取 embedding 回應失敗：{e}"))?;
-    if !status.is_success() {
-        return Err(format!("embedding API 回傳 {status}：{text}"));
-    }
-    let json: Value = serde_json::from_str(&text)
-        .map_err(|e| format!("embedding 回應不是有效 JSON：{e}；內容：{text}"))?;
-    let data = json
-        .get("data")
-        .and_then(Value::as_array)
-        .ok_or_else(|| format!("embedding 回應缺少 data：{text}"))?;
-    let mut out: Vec<Option<Vec<f32>>> = vec![None; inputs.len()];
-    for item in data {
-        let idx = item.get("index").and_then(Value::as_u64).unwrap_or(0) as usize;
-        let emb = item
-            .get("embedding")
-            .and_then(Value::as_array)
-            .ok_or_else(|| format!("embedding item 缺少 embedding：{item}"))?;
-        let vec: Vec<f32> = emb
-            .iter()
-            .filter_map(|v| v.as_f64().map(|x| x as f32))
-            .collect();
-        if idx < out.len() {
-            out[idx] = Some(vec);
-        }
-    }
-    let parsed: Vec<Vec<f32>> = out
-        .into_iter()
-        .enumerate()
-        .map(|(i, v)| v.ok_or_else(|| format!("embedding 缺少 index {i}")))
-        .collect::<Result<Vec<Vec<f32>>, String>>()?;
-    Ok((parsed, body, json))
-}
-
-fn cosine_similarity(a: &[f32], b: &[f32]) -> f32 {
-    let dot: f32 = a.iter().zip(b.iter()).map(|(x, y)| x * y).sum();
-    let na: f32 = a.iter().map(|x| x * x).sum::<f32>().sqrt();
-    let nb: f32 = b.iter().map(|x| x * x).sum::<f32>().sqrt();
-    if na == 0.0 || nb == 0.0 {
-        0.0
-    } else {
-        dot / (na * nb)
-    }
-}
-
 async fn perform_fetch_url(url: &str) -> Result<String, String> {
     if !(url.starts_with("http://") || url.starts_with("https://")) {
         return Err("fetch_url 只支援 http/https URL".to_string());
@@ -2743,31 +2664,6 @@ async fn execute_agent_with_tools(
     let endpoint = tool_chat_endpoint(base_url)?;
     // Definitions for the tools the user pre-checked (goes straight into tools[] payload).
     let selected_builtin_defs = tool_definitions(&request.tools)?;
-    // When tools_search is enabled, the discovery pool must include EVERY builtin so the AI
-    // can search for tools the user did not pre-check (e.g. web_search when only tools_search
-    // is checked). Otherwise the pool matches the pre-checked selection.
-    const ALL_BUILTIN_TOOL_NAMES: &[&str] = &[
-        "list_directory",
-        "search_content",
-        "grep_search",
-        "read_file",
-        "write_file",
-        "replace_string",
-        "trigger_event",
-        "web_search",
-        "fetch_url",
-        "get_current_time",
-        "execute_command",
-    ];
-    let catalog_builtin_defs = if request.tools_search {
-        let all_names: Vec<String> = ALL_BUILTIN_TOOL_NAMES
-            .iter()
-            .map(|s| s.to_string())
-            .collect();
-        tool_definitions(&all_names)?
-    } else {
-        selected_builtin_defs.clone()
-    };
     let workspace_root = tool_workspace_root(&request.working_directory)?;
 
     // Connect to MCP servers and collect their tools
@@ -2775,7 +2671,6 @@ async fn execute_agent_with_tools(
     // tool_name -> index into mcp_clients
     let mut mcp_tool_map: HashMap<String, usize> = HashMap::new();
     let mut mcp_tool_definitions: Vec<Value> = Vec::new();
-    let mut pre_checked_mcp_tools = std::collections::HashSet::new();
     let workspace_str = workspace_root.to_str().unwrap_or("");
     for server in &request.mcp_servers {
         if !server.enabled {
@@ -2788,21 +2683,8 @@ async fn execute_agent_with_tools(
                         let idx = mcp_clients.len();
                         let openai_tools_all = mcp_tools_to_openai(&tools);
 
-                        // Track which MCP tools are pre-checked
                         let is_mcp_empty = request.selected_mcp_tools.is_empty();
-                        for t in &openai_tools_all {
-                            if let Some(name) = t.pointer("/function/name").and_then(Value::as_str)
-                            {
-                                let qualified = format!("{}::{}", server.name, name);
-                                if is_mcp_empty || request.selected_mcp_tools.contains(&qualified) {
-                                    pre_checked_mcp_tools.insert(name.to_string());
-                                }
-                            }
-                        }
-
-                        // If tools_search is enabled, catalog must contain ALL tools of enabled MCP servers
-                        // so they can be matched by keyword or vector search.
-                        let openai_tools: Vec<Value> = if request.tools_search || is_mcp_empty {
+                        let openai_tools: Vec<Value> = if is_mcp_empty {
                             openai_tools_all
                         } else {
                             openai_tools_all
@@ -2832,13 +2714,10 @@ async fn execute_agent_with_tools(
             Err(e) => eprintln!("MCP {} 初始化失敗：{e}", server.name),
         }
     }
-    // Build a catalog of every tool definition keyed by name — this is the pool
-    // tools_search can discover from. When tools_search is on, catalog contains
-    // all builtin tools (regardless of checkboxes) so the AI can find them by
-    // keyword; when off, it only contains what the user explicitly selected.
+    // Build a catalog of every tool definition keyed by name.
     let mut all_tool_defs: std::collections::HashMap<String, Value> =
         std::collections::HashMap::new();
-    for def in catalog_builtin_defs
+    for def in selected_builtin_defs
         .iter()
         .chain(mcp_tool_definitions.iter())
     {
@@ -2847,276 +2726,7 @@ async fn execute_agent_with_tools(
         }
     }
 
-    // tools_search mode: only the pre-checked built-ins and pre-checked MCP tools
-    // go into tools[] directly (pre-unlocked). Everything else in the catalog is discovered via tools_search.
-    // No tools_search: catalog only has the checked ones — all unlocked.
-    let mut unlocked_tools: std::collections::HashSet<String> = if request.tools_search {
-        let mut set: std::collections::HashSet<String> = selected_builtin_defs
-            .iter()
-            .filter_map(|def| {
-                def.pointer("/function/name")
-                    .and_then(Value::as_str)
-                    .map(String::from)
-            })
-            .collect();
-        set.extend(pre_checked_mcp_tools);
-        set
-    } else {
-        all_tool_defs.keys().cloned().collect()
-    };
-
-    // Vector-search pre-unlock: when tools_search is on AND embedding config is
-    // fully set, embed the user task + tool descriptions and unlock the top-K
-    // most similar tools so the AI can call them immediately (skips a tools_search
-    // round for the common case).
-    let embedding_configured = request.tools_search
-        && !request.embedding_api_base_url.trim().is_empty()
-        && !request.embedding_model.trim().is_empty();
-    let mut vector_unlocked: Vec<(String, f32)> = Vec::new();
-    if embedding_configured {
-        let query_text = {
-            let p_trimmed = request.prompt.trim();
-            let i_trimmed = input.trim();
-            if p_trimmed.is_empty() {
-                i_trimmed.to_string()
-            } else if i_trimmed.is_empty()
-                || i_trimmed == "{}"
-                || i_trimmed == "null"
-                || p_trimmed == i_trimmed
-            {
-                p_trimmed.to_string()
-            } else {
-                format!("{}\n{}", p_trimmed, i_trimmed)
-            }
-        };
-        if !query_text.is_empty() {
-            // Prepare docs: name + description + English aliases for better matching.
-            let mut names: Vec<String> = Vec::new();
-            let mut docs: Vec<String> = Vec::new();
-            for (name, def) in &all_tool_defs {
-                let desc = def
-                    .pointer("/function/description")
-                    .and_then(Value::as_str)
-                    .unwrap_or("");
-                let aliases = tool_aliases(name).join(" ");
-                docs.push(format!("{name}. {desc} {aliases}"));
-                names.push(name.clone());
-            }
-            let mut inputs = Vec::with_capacity(docs.len() + 1);
-            inputs.push(query_text.clone());
-            inputs.extend(docs);
-            let embed_endpoint = {
-                let base = request.embedding_api_base_url.trim().trim_end_matches('/');
-                if base.ends_with("/embeddings") {
-                    base.to_string()
-                } else {
-                    format!("{base}/embeddings")
-                }
-            };
-            let start_request_body = serde_json::json!({
-                "model": &request.embedding_model,
-                "input": &inputs
-            });
-            // Announce the vector search — user sees model, endpoint, candidate count, task snippet.
-            emit_model_exchange(
-                app_handle,
-                request,
-                0,
-                "vector_search",
-                &embed_endpoint,
-                serde_json::json!({
-                    "phase": "start",
-                    "model": request.embedding_model,
-                    "candidate_count": all_tool_defs.len(),
-                    "user_task": query_text.chars().take(200).collect::<String>(),
-                    "request_body": start_request_body,
-                }),
-            );
-            match get_embeddings(
-                &request.embedding_api_base_url,
-                &request.embedding_api_key,
-                &request.embedding_model,
-                inputs,
-            )
-            .await
-            {
-                Ok((embeddings, request_body, response_body)) if embeddings.len() >= 2 => {
-                    let query_emb = &embeddings[0];
-                    let mut scored: Vec<(f32, String)> = names
-                        .iter()
-                        .enumerate()
-                        .map(|(i, n)| (cosine_similarity(query_emb, &embeddings[i + 1]), n.clone()))
-                        .collect();
-                    scored
-                        .sort_by(|a, b| b.0.partial_cmp(&a.0).unwrap_or(std::cmp::Ordering::Equal));
-                    const TOP_K: usize = 5;
-                    // Capture full ranking BEFORE consuming into top-K so we can log it.
-                    let ranking: Vec<Value> = scored
-                        .iter()
-                        .map(|(s, n)| serde_json::json!({ "name": n, "score": s }))
-                        .collect();
-                    let mut unlocked_this_call: Vec<Value> = Vec::new();
-                    for (score, name) in scored.into_iter().take(TOP_K) {
-                        let already = !unlocked_tools.insert(name.clone());
-                        if !already {
-                            vector_unlocked.push((name.clone(), score));
-                        }
-                        unlocked_this_call.push(serde_json::json!({
-                            "name": name,
-                            "score": score,
-                            "already_unlocked": already
-                        }));
-                    }
-                    emit_model_exchange(
-                        app_handle,
-                        request,
-                        0,
-                        "vector_search",
-                        &embed_endpoint,
-                        serde_json::json!({
-                            "phase": "result",
-                            "top_k": TOP_K,
-                            "ranking": ranking,
-                            "unlocked": unlocked_this_call,
-                            "embedding_dim": embeddings[0].len(),
-                            "request_body": request_body,
-                            "response_body": response_body,
-                        }),
-                    );
-                }
-                Ok((_, request_body, response_body)) => {
-                    emit_model_exchange(
-                        app_handle,
-                        request,
-                        0,
-                        "vector_search",
-                        &embed_endpoint,
-                        serde_json::json!({
-                            "phase": "error",
-                            "error": "embedding 回應少於預期（少於 2 筆）",
-                            "request_body": request_body,
-                            "response_body": response_body,
-                        }),
-                    );
-                }
-                Err(e) => {
-                    emit_model_exchange(
-                        app_handle,
-                        request,
-                        0,
-                        "vector_search",
-                        &embed_endpoint,
-                        serde_json::json!({
-                            "phase": "error",
-                            "error": e,
-                            "request_body": start_request_body,
-                        }),
-                    );
-                }
-            }
-        }
-    }
-    let tools_search_def = serde_json::json!({
-        "type": "function",
-        "function": {
-            "name": "tools_search",
-            "description": "Discover callable tools for a task. Search by TASK KEYWORDS IN ENGLISH ONLY (what you want to do — 'weather', 'read file', 'current time'). Do NOT use non-English words — translate the user's intent to English first. Do NOT guess tool names. Matched tools become callable on the next round — after receiving results, invoke them directly, do NOT call tools_search again for the same task. Empty query returns a compact index of every tool (no descriptions) — prefer keyword search first.",
-            "parameters": {
-                "type": "object",
-                "properties": {
-                    "query": {
-                        "type": "string",
-                        "description": "Task keyword IN ENGLISH ONLY. E.g. 'weather', 'file', 'time', 'search web', 'edit text'. Translate the user's intent to English before searching. Empty string returns compact index of all tools."
-                    }
-                },
-                "additionalProperties": false
-            }
-        }
-    });
-
-    // Task-keyword aliases for built-in tools — expands search to concept matches.
-    // MCP tools have no aliases (only name/description matching applies).
-    fn tool_aliases(name: &str) -> &'static [&'static str] {
-        match name {
-            "list_directory" => &[
-                "folder",
-                "directory",
-                "files",
-                "ls",
-                "dir",
-                "workspace",
-                "browse",
-            ],
-            "search_content" => &[
-                "grep", "find", "search", "text", "content", "code", "keyword",
-            ],
-            "grep_search" => &[
-                "grep", "find", "search", "text", "content", "code", "keyword",
-            ],
-            "read_file" => &["file", "read", "load", "open", "content", "text"],
-            "write_file" => &["file", "write", "save", "create", "output"],
-            "replace_string" => &["edit", "modify", "change", "update", "patch"],
-            "trigger_event" => &[
-                "event",
-                "trigger",
-                "notify",
-                "signal",
-                "integrate",
-                "call",
-                "hook",
-            ],
-            "web_search" => &[
-                "web", "internet", "google", "search", "online", "news", "weather", "stock",
-                "info", "lookup", "research", "query",
-            ],
-            "fetch_url" => &[
-                "web", "url", "http", "https", "page", "site", "download", "get", "content",
-                "html", "scrape", "weather", "news",
-            ],
-            "get_current_time" => &[
-                "time",
-                "date",
-                "now",
-                "today",
-                "clock",
-                "timezone",
-                "current",
-                "moment",
-                "timestamp",
-                "day",
-                "hour",
-                "minute",
-            ],
-            "execute_command" => &[
-                "command",
-                "terminal",
-                "shell",
-                "process",
-                "run",
-                "execute",
-                "cli",
-                "script",
-                "npm",
-                "cargo",
-                "git",
-                "powershell",
-                "cmd",
-            ],
-            _ => &[],
-        }
-    }
-    let build_active_tools = |unlocked: &std::collections::HashSet<String>| -> Vec<Value> {
-        let mut active: Vec<Value> = Vec::new();
-        if request.tools_search {
-            active.push(tools_search_def.clone());
-        }
-        for name in unlocked {
-            if let Some(def) = all_tool_defs.get(name) {
-                active.push(def.clone());
-            }
-        }
-        active
-    };
+    let active_tools: Vec<Value> = all_tool_defs.values().cloned().collect();
     let has_user_prompt = has_parameters && !request.prompt.trim().is_empty();
     let skill_prompts = load_skill_prompts(&request.skills);
     let memory_history = if request.memory && !request.item_code.is_empty() {
@@ -3221,11 +2831,10 @@ async fn execute_agent_with_tools(
             }
         }
 
-        let active_tools = build_active_tools(&unlocked_tools);
         let mut body = serde_json::json!({
             "model": request.model_name,
             "messages": messages.clone(),
-            "tools": active_tools,
+            "tools": active_tools.clone(),
             "tool_choice": tool_choice,
             "parallel_tool_calls": false,
             "stream": false
@@ -3237,6 +2846,9 @@ async fn execute_agent_with_tools(
         // Build annotated copy for logging (actual request uses body without _source)
         let mut emit_body = body.clone();
         if let Some(msgs) = emit_body["messages"].as_array_mut() {
+            if request.resume_messages.is_some() {
+                annotate_resumed_message_sources(msgs);
+            } else {
             // Layout: [user_prompt?] [skill_0..n?] [agent_instruction] [memory_0..n?] [user_input] [history...]
             let skill_count = skill_prompts.len();
             let agent_instr_idx = (has_user_prompt as usize) + skill_count;
@@ -3260,6 +2872,7 @@ async fn execute_agent_with_tools(
                     "💬 對話歷史".to_string()
                 };
                 msg["_source"] = Value::String(source);
+            }
             }
         }
         let build_request = || {
@@ -3394,77 +3007,11 @@ async fn execute_agent_with_tools(
             let arguments = parsed_arguments
                 .clone()
                 .unwrap_or_else(|_| serde_json::json!({}));
-            // With tools_search enabled, the tools[] payload only exposes tools_search
-            // itself. Any other tool call is a hallucination unless the AI first unlocked
-            // the tool via tools_search.
-            let is_locked =
-                request.tools_search && name != "tools_search" && !unlocked_tools.contains(name);
             let result = if let Err(error) = parsed_arguments {
                 format!("Error: {error}. 請用有效 JSON 重新呼叫工具，並把 timeout_seconds 放在 args 陣列外層。")
-            } else if is_locked {
-                format!(
-                    "Error: 工具 `{name}` 尚未解鎖。tools_search 模式下，必須先呼叫 tools_search 用 English keyword 搜出並解鎖工具，才能呼叫該工具。"
-                )
-            } else if request.tools_search && name == "tools_search" {
-                let query = arguments
-                    .get("query")
-                    .and_then(Value::as_str)
-                    .unwrap_or("")
-                    .trim()
-                    .to_lowercase();
-                if query.is_empty() {
-                    // Compact index: name-only list, no descriptions, NO unlock.
-                    let mut names: Vec<String> = all_tool_defs.keys().cloned().collect();
-                    names.sort();
-                    serde_json::json!({
-                        "all_tool_names": names,
-                        "next_step": "Call tools_search again with a task keyword (e.g. 'weather', 'file', 'time') to unlock the tools you actually need."
-                    }).to_string()
-                } else {
-                    let mut matches: Vec<Value> = Vec::new();
-                    let mut newly_unlocked: Vec<String> = Vec::new();
-                    for (tool_name, def) in &all_tool_defs {
-                        let desc = def
-                            .pointer("/function/description")
-                            .and_then(Value::as_str)
-                            .unwrap_or("");
-                        let name_hit = tool_name.to_lowercase().contains(&query);
-                        let desc_hit = desc.to_lowercase().contains(&query);
-                        let alias_hit = tool_aliases(tool_name).iter().any(|a| {
-                            a.to_lowercase().contains(&query) || query.contains(&a.to_lowercase())
-                        });
-                        if name_hit || desc_hit || alias_hit {
-                            matches.push(serde_json::json!({
-                                "name": tool_name,
-                                "description": desc
-                            }));
-                            if unlocked_tools.insert(tool_name.clone()) {
-                                newly_unlocked.push(tool_name.clone());
-                            }
-                        }
-                    }
-                    matches.sort_by(|a, b| {
-                        let an = a.get("name").and_then(Value::as_str).unwrap_or("");
-                        let bn = b.get("name").and_then(Value::as_str).unwrap_or("");
-                        an.cmp(bn)
-                    });
-                    if matches.is_empty() {
-                        serde_json::json!({
-                            "matches": [],
-                            "hint": format!("No tools matched「{query}」. Try broader keywords (e.g. 'web' instead of 'weather', 'file' instead of 'csv'), or pass empty query for the full index.")
-                        }).to_string()
-                    } else {
-                        serde_json::json!({
-                            "matches": matches,
-                            "newly_unlocked": newly_unlocked,
-                            "next_step": "These tools are callable next round. Invoke them directly — do NOT call tools_search again unless you need a different capability."
-                        }).to_string()
-                    }
-                }
             } else if all_tool_defs.contains_key(name) && !mcp_tool_map.contains_key(name) {
-                // Built-in tool. `all_tool_defs` includes both pre-checked and (in
-                // tools_search mode) auto-discoverable builtins. MCP tools also live
-                // in the catalog, so exclude them here — they're handled below.
+                // Built-in tool. MCP tools also live in the catalog, so exclude them
+                // here — they're handled below.
                 if name == "web_search" {
                     let query = arguments.get("query").and_then(Value::as_str).unwrap_or("");
                     if query.is_empty() {
@@ -3577,7 +3124,6 @@ async fn execute_agent(
     }
     let mut request = request;
     request.api_key = resolve_env_key(&request.api_key);
-    request.embedding_api_key = resolve_env_key(&request.embedding_api_key);
     let base_url = request.api_base_url.trim().trim_end_matches('/');
     if base_url.is_empty() {
         return Err("尚未設定 API URL".to_string());
@@ -3603,10 +3149,7 @@ async fn execute_agent(
         None => return Err("沒有可傳送的 Prompt 或 HTTP 輸入參數".to_string()),
     };
 
-    if !request.tools.is_empty()
-        || request.mcp_servers.iter().any(|s| s.enabled)
-        || request.tools_search
-    {
+    if !request.tools.is_empty() || request.mcp_servers.iter().any(|s| s.enabled) {
         let res =
             execute_agent_with_tools(&app_handle, &request, base_url, input, has_parameters).await;
         if let Ok(mut map) = pending_agent_messages().lock() {
@@ -3617,10 +3160,16 @@ async fn execute_agent(
 
     let has_user_prompt = has_parameters && !request.prompt.trim().is_empty();
     let skill_prompts = load_skill_prompts(&request.skills);
+    let resumed_messages = request.resume_messages.clone();
     let body = if is_lm_studio_native {
+        let input_for_body = if let Some(messages) = resumed_messages.as_ref() {
+            serde_json::to_string_pretty(messages).unwrap_or_else(|_| input.clone())
+        } else {
+            input.clone()
+        };
         let mut body = serde_json::json!({
             "model": request.model_name,
-            "input": input,
+            "input": input_for_body,
             "store": false
         });
         if has_user_prompt {
@@ -3643,15 +3192,21 @@ async fn execute_agent(
         }
         body
     } else {
-        let mut messages = Vec::new();
-        if has_user_prompt {
+        let messages = if let Some(messages) = resumed_messages.clone() {
             messages
-                .push(serde_json::json!({ "role": "system", "content": request.prompt.clone() }));
-        }
-        for (_, skill_content) in &skill_prompts {
-            messages.push(serde_json::json!({ "role": "system", "content": skill_content }));
-        }
-        messages.push(serde_json::json!({ "role": "user", "content": input }));
+        } else {
+            let mut messages = Vec::new();
+            if has_user_prompt {
+                messages.push(
+                    serde_json::json!({ "role": "system", "content": request.prompt.clone() }),
+                );
+            }
+            for (_, skill_content) in &skill_prompts {
+                messages.push(serde_json::json!({ "role": "system", "content": skill_content }));
+            }
+            messages.push(serde_json::json!({ "role": "user", "content": input }));
+            messages
+        };
         serde_json::json!({
             "model": request.model_name,
             "messages": messages,
@@ -3668,6 +3223,9 @@ async fn execute_agent(
     // Build annotated copy for logging (actual request uses body without _source)
     let mut emit_body = body.clone();
     if let Some(msgs) = emit_body["messages"].as_array_mut() {
+        if request.resume_messages.is_some() {
+            annotate_resumed_message_sources(msgs);
+        } else {
         let skill_count = skill_prompts.len();
         let user_input_idx = (has_user_prompt as usize) + skill_count;
         for (i, msg) in msgs.iter_mut().enumerate() {
@@ -3684,6 +3242,7 @@ async fn execute_agent(
                 "💬 對話歷史".to_string()
             };
             msg["_source"] = Value::String(source);
+        }
         }
     }
     if is_lm_studio_native {
