@@ -2,6 +2,7 @@ import './style.css'
 import { invoke } from '@tauri-apps/api/core'
 import { listen } from '@tauri-apps/api/event'
 import { open as openDialog } from '@tauri-apps/plugin-dialog'
+import { getVersion } from '@tauri-apps/api/app'
 
 // ============================================================
 // Tauri 偵測與設定檔存取層
@@ -10,6 +11,17 @@ import { open as openDialog } from '@tauri-apps/plugin-dialog'
 /** 是否在 Tauri 桌面環境中執行 */
 function isTauri(): boolean {
   return !!(window as any).__TAURI_INTERNALS__
+}
+
+/** 將實際執行的 App 版號套用到視窗標題與畫面標頭，避免寫死的版號跟 tauri.conf.json 不同步 */
+async function applyAppVersionToTitle(): Promise<void> {
+  if (!isTauri()) return
+  try {
+    const version = await getVersion()
+    document.title = `ListAgent ${version}`
+    const titleEl = document.getElementById('app-title')
+    if (titleEl) titleEl.textContent = `📋 ListAgent ${version}`
+  } catch { /* ignore */ }
 }
 
 interface SettingsFile {
@@ -4282,6 +4294,7 @@ if (selectTheme) {
 // ============================================================
 
 ;(async () => {
+  void applyAppVersionToTitle()
   // 從 localStorage / Tauri 還原先前儲存的項目與全域設定
   items = await loadItems()
   await loadGlobalSettings()
