@@ -627,6 +627,7 @@ const inputMaxRounds = document.getElementById('input-max-rounds') as HTMLInputE
 const skillListEl = document.getElementById('skill-list') as HTMLElement
 const selectPreset = document.getElementById('select-preset') as HTMLSelectElement
 const btnSavePreset = document.getElementById('btn-save-preset') as HTMLButtonElement
+const btnDeletePreset = document.getElementById('btn-delete-preset') as HTMLButtonElement
 const btnSave = document.getElementById('btn-save') as HTMLButtonElement
 const btnCancel = document.getElementById('btn-cancel') as HTMLButtonElement
 const btnDelete = document.getElementById('btn-delete') as HTMLButtonElement
@@ -3140,6 +3141,30 @@ async function saveAsPreset(): Promise<void> {
   selectPreset.value = `user:${existingIdx >= 0 ? existingIdx : userPresets.length - 1}`
 }
 
+/** 刪除下拉選單目前選取的自訂群組（內建群組不可刪除） */
+async function deleteSelectedPreset(): Promise<void> {
+  const value = selectPreset.value
+  if (!value) {
+    alert('請先選擇一個要刪除的群組。')
+    return
+  }
+  if (!value.startsWith('user:')) {
+    alert('內建群組不可刪除。')
+    return
+  }
+
+  const idx = parseInt(value.slice(5), 10)
+  const userPresets = await loadUserPresets()
+  const preset = userPresets[idx]
+  if (!preset) return
+  if (!confirm(`確定要刪除群組「${preset.name}」？此動作無法復原。`)) return
+
+  userPresets.splice(idx, 1)
+  await saveUserPresets(userPresets)
+  await populatePresetDropdown()
+  selectPreset.value = ''
+}
+
 /** 從後端載入 skills 並渲染成 checkbox 清單 */
 async function loadAndRenderSkills(selectedSkills: string[]): Promise<void> {
   skillListEl.innerHTML = '<span class="skill-placeholder">載入中…</span>'
@@ -4121,6 +4146,9 @@ selectPreset.addEventListener('change', onPresetChange)
 
 /** 儲存為新群組 */
 btnSavePreset.addEventListener('click', saveAsPreset)
+
+/** 刪除選取的群組 */
+btnDeletePreset.addEventListener('click', deleteSelectedPreset)
 
 /** 鍵盤快捷鍵：Enter 儲存、Esc 關閉 */
 document.addEventListener('keydown', (e) => {
