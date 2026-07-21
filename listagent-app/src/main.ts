@@ -103,6 +103,8 @@ interface AgentExecutionResult {
   stats?: unknown
   paused?: boolean
   resumeState?: { messages: unknown[], roundIndex: number }
+  /** 模型 API 回應中回報的實際服務模型（如有），用來偵測與請求模型不一致的情況 */
+  actualModel?: string
 }
 
 /** 暫停任務時保留的繼續執行所需資訊（記憶體中；同時會存進 session 檔以撐過關閉 App） */
@@ -1327,6 +1329,13 @@ async function runItem(id: number, parameters?: unknown, execId?: string, overri
       })
     } else {
       logs.push({ level: 'success', message: `模型端點：${result.endpoint}`, timestamp: Date.now() })
+      if (result.actualModel && result.actualModel.trim() !== finalModel.trim()) {
+        logs.push({
+          level: 'warn',
+          message: `⚠️ 模型不符：請求的模型為「${finalModel}」，但伺服器實際回應執行的模型是「${result.actualModel}」。結果可能不是你以為在測的模型，請檢查 Model Override／模型群組設定或伺服器端的模型載入狀態。`,
+          timestamp: Date.now(),
+        })
+      }
       logs.push({ level: 'system', message: result.content, html: renderMarkdownSafe(result.content), timestamp: Date.now() + 1 })
       taskSuccess = true
       taskContent = result.content ?? ''

@@ -323,6 +323,11 @@ struct AgentExecutionResult {
     /// 暫停時的完整對話狀態（messages + roundIndex），交給前端存檔，繼續執行時原封傳回。
     #[serde(default, rename = "resumeState")]
     resume_state: Option<Value>,
+    /// 模型 API 回應中回報的實際服務模型（例如 LM Studio 的 model_instance_id，
+    /// 或 OpenAI 相容回應的 model 欄位）。用來讓前端偵測「請求的模型」與「實際執行的模型」
+    /// 不一致的情況（常見於本機推論伺服器忽略 model 參數、改用當下已載入的模型）。
+    #[serde(default)]
+    actual_model: Option<String>,
 }
 
 #[derive(Clone, Serialize)]
@@ -2983,6 +2988,7 @@ async fn execute_agent_with_tools(
                     tool_calls: execution_logs,
                     paused: false,
                     resume_state: None,
+                    actual_model: json.get("model").and_then(Value::as_str).map(str::to_string),
                 });
             } else {
                 println!(">>> execute_agent_with_tools: tool_calls is empty, but pending user messages exist! Continuing conversation loop.");
@@ -3104,6 +3110,7 @@ async fn execute_agent_with_tools(
                     "messages": messages,
                     "roundIndex": round_index,
                 })),
+                actual_model: None,
             });
         }
     }
@@ -3349,6 +3356,11 @@ async fn execute_agent(
         tool_calls: Vec::new(),
         paused: false,
         resume_state: None,
+        actual_model: json
+            .get("model_instance_id")
+            .or_else(|| json.get("model"))
+            .and_then(Value::as_str)
+            .map(str::to_string),
     })
 }
 
