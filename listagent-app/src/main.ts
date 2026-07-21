@@ -1190,20 +1190,12 @@ async function runItem(id: number, parameters?: unknown, execId?: string, overri
   let finalApiKey = item.apiKey
   let modelOverrideMsg = ''
 
+  // HTTP 的 model 參數一律當作字面模型名稱直接覆蓋（見 README /input 文件），
+  // 不比對已存的模型群組名稱——曾經誤把它當群組名查找，若剛好撞名就會靜默改用
+  // 該群組（可能過期）的 modelName，導致實際執行的模型跟呼叫端指定的完全不同。
   if (overrideModel) {
-    const userPresets = await loadUserPresets()
-    const matchedPreset = userPresets.find((p) => p.name === overrideModel)
-      || DEFAULT_PRESETS.find((p) => p.name === overrideModel)
-
-    if (matchedPreset) {
-      finalModel = matchedPreset.modelName
-      finalApiBaseUrl = matchedPreset.apiBaseUrl
-      finalApiKey = matchedPreset.apiKey
-      modelOverrideMsg = ` (載入模型群組「${overrideModel}」)`
-    } else {
-      finalModel = overrideModel
-      modelOverrideMsg = ' (含 HTTP 參數指定)'
-    }
+    finalModel = overrideModel
+    modelOverrideMsg = ' (含 HTTP 參數指定)'
   }
 
   const finalTools = overrideTools && overrideTools.length > 0
