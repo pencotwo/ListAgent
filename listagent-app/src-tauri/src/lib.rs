@@ -913,7 +913,7 @@ fn take_http_inputs(queue: State<'_, HttpInputQueue>) -> Vec<HttpInput> {
 }
 
 fn tool_definitions(selected: &[String]) -> Result<Vec<Value>, String> {
-    selected
+    let defs: Result<Vec<Value>, String> = selected
         .iter()
         .map(|name| match name.as_str() {
             "list_directory" | "list_dir" => Ok(serde_json::json!({
@@ -1101,9 +1101,13 @@ fn tool_definitions(selected: &[String]) -> Result<Vec<Value>, String> {
                     }
                 }
             })),
-            _ => Err(format!("不支援的工具：{name}")),
+            _ => {
+                eprintln!("WARNING：找不到工具「{name}」，已略過並繼續執行");
+                Ok(Value::Null)
+            }
         })
-        .collect()
+        .collect();
+    Ok(defs?.into_iter().filter(|v| !v.is_null()).collect())
 }
 
 fn tool_workspace_root(configured_directory: &str) -> Result<PathBuf, String> {
