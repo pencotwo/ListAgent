@@ -1,4 +1,4 @@
-import './style.css'
+﻿import './style.css'
 import { invoke } from '@tauri-apps/api/core'
 import { listen } from '@tauri-apps/api/event'
 import { open as openDialog } from '@tauri-apps/plugin-dialog'
@@ -67,6 +67,7 @@ interface ListItem {
   memory: boolean
   allowHttp: boolean
   maxRounds: number
+  toolsSearch: boolean
 }
 
 type PersistedListItem = Omit<ListItem, 'code'>
@@ -229,6 +230,7 @@ function hydrateItems(storedItems: PersistedListItem[]): ListItem[] {
     memory: typeof item.memory === 'boolean' ? item.memory : false,
     allowHttp: typeof item.allowHttp === 'boolean' ? item.allowHttp : false,
     maxRounds: typeof item.maxRounds === 'number' && item.maxRounds > 0 ? item.maxRounds : 100,
+    toolsSearch: typeof item.toolsSearch === 'boolean' ? item.toolsSearch : false,
   }))
 }
 
@@ -249,6 +251,7 @@ function getPersistedItems(): PersistedListItem[] {
     memory: item.memory,
     allowHttp: item.allowHttp,
     maxRounds: item.maxRounds,
+    toolsSearch: item.toolsSearch,
   }))
 }
 
@@ -624,6 +627,7 @@ const btnSelectWorkingDirectory = document.getElementById('btn-select-working-di
 const toolCheckboxes = Array.from(document.querySelectorAll<HTMLInputElement>('input[name="agent-tool"]'))
 const inputMemory = document.getElementById('input-memory') as HTMLInputElement
 const inputMaxRounds = document.getElementById('input-max-rounds') as HTMLInputElement
+const inputToolsSearch = document.getElementById('input-tools-search') as HTMLInputElement
 const skillListEl = document.getElementById('skill-list') as HTMLElement
 const selectPreset = document.getElementById('select-preset') as HTMLSelectElement
 const btnSavePreset = document.getElementById('btn-save-preset') as HTMLButtonElement
@@ -789,10 +793,6 @@ function createItemCard(item: ListItem): HTMLElement {
     eventIcon.title = `事件：${itemEvents.length}（待執行／循環：${activeEvents.length}）`
   }
 
-  // 圖示列（卡片頂部）
-  const iconsRow = document.createElement('div')
-  iconsRow.className = 'card-icons-row'
-
   // 項目資訊
   const info = document.createElement('div')
   info.className = 'item-info'
@@ -856,14 +856,14 @@ function createItemCard(item: ListItem): HTMLElement {
     selectItem(item.id)
   })
 
-  // 組裝圖示列
-  if (itemEvents.length > 0) iconsRow.appendChild(eventIcon)
+  // 在底部列加入狀態圖示（左下角）
+  if (itemEvents.length > 0) bottomRow.appendChild(eventIcon)
   if (item.allowHttp) {
     const httpIcon = document.createElement('span')
     httpIcon.className = 'item-event-icon active'
     httpIcon.textContent = '🌐'
     httpIcon.title = '允許透過 HTTP 請求執行此 Agent 任務'
-    iconsRow.appendChild(httpIcon)
+    bottomRow.appendChild(httpIcon)
   }
   const itemMappings = eventMappings.filter((m) => m.agentId === item.id)
   if (itemMappings.length > 0) {
@@ -871,11 +871,10 @@ function createItemCard(item: ListItem): HTMLElement {
     mappingIcon.className = 'item-event-icon active'
     mappingIcon.textContent = '🔗'
     mappingIcon.title = `事件訂閱：已訂閱 ${itemMappings.length} 個自訂事件（${itemMappings.map(m => m.eventId).join(', ')}）`
-    iconsRow.appendChild(mappingIcon)
+    bottomRow.appendChild(mappingIcon)
   }
 
-  // 組裝卡片（順序：圖示列 → 資訊 → 底部 → 齒輪）
-  card.appendChild(iconsRow)
+  // 組裝卡片（順序：資訊 → 底部 → 齒輪）
   card.appendChild(info)
   card.appendChild(bottomRow)
   card.appendChild(gearBtn)
@@ -954,6 +953,7 @@ function createItemListRow(item: ListItem): HTMLElement {
     selectItem(item.id)
   })
 
+  row.appendChild(info)
   if (itemEvents.length > 0) row.appendChild(eventIcon)
   if (item.allowHttp) {
     const httpIcon = document.createElement('span')
@@ -970,7 +970,6 @@ function createItemListRow(item: ListItem): HTMLElement {
     mappingIcon.title = `事件訂閱：已訂閱 ${itemMappings.length} 個自訂事件（${itemMappings.map(m => m.eventId).join(', ')}）`
     row.appendChild(mappingIcon)
   }
-  row.appendChild(info)
   row.appendChild(spinners)
   row.appendChild(pauseBtn)
   row.appendChild(runBtn)
@@ -1246,7 +1245,9 @@ async function runItem(id: number, parameters?: unknown, execId?: string, overri
     if (item.skills.length > 0) {
       logs.push({
         level: 'info',
-        message: `已載入 Skills：${item.skills.join(', ')}`,
+        message: item.toolsSearch
+          ? `可搜尋 Skills（未預先載入）：${item.skills.join(', ')}`
+          : `已載入 Skills：${item.skills.join(', ')}`,
         timestamp: now + 5,
       })
     }
@@ -1263,6 +1264,13 @@ async function runItem(id: number, parameters?: unknown, execId?: string, overri
         level: 'info',
         message: '記憶功能：開啟（自動攜帶上次對話歷史）',
         timestamp: now + 7,
+      })
+    }
+    if (item.toolsSearch) {
+      logs.push({
+        level: 'info',
+        message: 'SKILLS/TOOLS SEARCH：開啟（Skills 與 Tools 預設不帶入 context，由 AI 依需求搜尋後才載入）',
+        timestamp: now + 8,
       })
     }
   }
@@ -1301,6 +1309,8 @@ async function runItem(id: number, parameters?: unknown, execId?: string, overri
         selectedMcpTools: item.mcpTools,
         memory: item.memory,
         itemCode: item.code,
+        maxRounds: item.maxRounds,
+        toolsSearch: item.toolsSearch,
         resumeMessages: resumeState?.messages,
         resumeRound: resumeState?.round,
       },
@@ -3376,6 +3386,7 @@ async function openSettingsDialog(itemId: number): Promise<void> {
   })
   inputMemory.checked = item.memory
   inputMaxRounds.value = String(item.maxRounds)
+  inputToolsSearch.checked = item.toolsSearch
 
   settingsOverlay.classList.remove('hidden')
 
@@ -3707,6 +3718,7 @@ async function saveSettings(): Promise<void> {
     item.memory = inputMemory.checked
     const rounds = parseInt(inputMaxRounds.value, 10)
     item.maxRounds = Number.isFinite(rounds) && rounds > 0 ? rounds : 100
+    item.toolsSearch = inputToolsSearch.checked
   }
 
   // 將 API 設定同步回下拉選單選擇的 AI 模型群組
@@ -3741,6 +3753,7 @@ async function createAgent(selectAfterCreate = false): Promise<ListItem> {
     memory: false,
     allowHttp: false,
     maxRounds: 100,
+    toolsSearch: false,
   }
   items.push(newItem)
   await saveItems()

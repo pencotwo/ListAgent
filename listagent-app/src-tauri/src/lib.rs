@@ -296,6 +296,8 @@ struct AgentExecutionRequest {
     #[serde(default = "default_max_rounds")]
     #[serde(rename = "maxRounds")]
     max_rounds: u32,
+    #[serde(default)]
+    tools_search: bool,
     /// 從暫停狀態繼續執行時，帶回上次中斷點累積的完整對話訊息（含 tool 呼叫/結果）。
     #[serde(default, rename = "resumeMessages")]
     resume_messages: Option<Vec<Value>>,
@@ -419,6 +421,9 @@ pub struct ListItem {
     #[serde(default = "default_max_rounds")]
     #[serde(rename = "maxRounds")]
     pub max_rounds: u32,
+    #[serde(default)]
+    #[serde(rename = "toolsSearch")]
+    pub tools_search: bool,
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
@@ -749,7 +754,7 @@ fn delete_skill(id: String) -> Result<(), String> {
     Ok(())
 }
 
-fn load_skill_prompts(skills: &[String]) -> Vec<(String, String)> {
+fn load_skill_entries(skills: &[String]) -> Vec<(SkillMeta, String)> {
     let dir = skills_dir();
     skills
         .iter()
@@ -759,9 +764,16 @@ fn load_skill_prompts(skills: &[String]) -> Vec<(String, String)> {
             if prompt.trim().is_empty() {
                 None
             } else {
-                Some((meta.name, prompt))
+                Some((meta, prompt))
             }
         })
+        .collect()
+}
+
+fn load_skill_prompts(skills: &[String]) -> Vec<(String, String)> {
+    load_skill_entries(skills)
+        .into_iter()
+        .map(|(meta, prompt)| (meta.name, prompt))
         .collect()
 }
 
@@ -910,6 +922,39 @@ fn take_http_inputs(queue: State<'_, HttpInputQueue>) -> Vec<HttpInput> {
         .lock()
         .map(|mut pending| pending.drain(..).collect())
         .unwrap_or_default()
+}
+
+/// Task-keyword aliases for built-in tools, used by search_tools_and_skills so natural-language
+/// queries (e.g. "git", "run shell") reach tools whose name/description doesn't literally contain them.
+fn builtin_tool_aliases(name: &str) -> &'static [&'static str] {
+    match name {
+        "list_directory" | "list_dir" => {
+            &["folder", "directory", "files", "ls", "dir", "browse", "workspace"]
+        }
+        "search_content" | "grep_search" => {
+            &["grep", "find", "search", "text", "content", "code", "keyword"]
+        }
+        "read_file" => &["file", "read", "load", "open", "content", "text"],
+        "write_file" => &["file", "write", "save", "create", "output"],
+        "replace_string" => &["edit", "modify", "change", "update", "patch"],
+        "trigger_event" => &["event", "trigger", "notify", "signal", "hook", "call"],
+        "web_search" => &[
+            "web", "internet", "google", "search", "online", "news", "weather", "stock", "info",
+            "lookup", "research", "query",
+        ],
+        "fetch_url" => &[
+            "web", "url", "http", "https", "page", "site", "download", "get", "html", "scrape",
+        ],
+        "get_current_time" => &[
+            "time", "date", "now", "today", "clock", "timezone", "current", "moment", "timestamp",
+        ],
+        "execute_command" => &[
+            "command", "shell", "terminal", "run", "exec", "execute", "build", "git", "commit",
+            "push", "npm", "cargo", "python", "script", "install", "test", "compile", "cmd",
+            "powershell", "bash",
+        ],
+        _ => &[],
+    }
 }
 
 fn tool_definitions(selected: &[String]) -> Result<Vec<Value>, String> {
@@ -2735,9 +2780,74 @@ async fn execute_agent_with_tools(
         }
     }
 
-    let active_tools: Vec<Value> = all_tool_defs.values().cloned().collect();
+    let skill_entries = load_skill_entries(&request.skills);
+    let search_tool_def = serde_json::json!({
+        "type": "function",
+        "function": {
+            "name": "search_tools_and_skills",
+            "description": "Search for tools and skills relevant to what you're about to do, and unlock/load them into context. Tools and skills are NOT available until found this way — call this with a keyword describing the capability you need (e.g. a tool name, or a topic) before assuming something isn't available. Matched tools become callable next round; matched skills are injected as additional instructions immediately. Call again with a different keyword if you need something else.",
+            "parameters": {
+                "type": "object",
+                "properties": {
+                    "query": {
+                        "type": "string",
+                        "description": "Keyword describing the capability you need, e.g. a tool name or a short topic phrase."
+                    }
+                },
+                "required": ["query"],
+                "additionalProperties": false
+            }
+        }
+    });
+    // tools_search off: everything pre-selected is unlocked immediately (unchanged behavior).
+    // tools_search on: nothing is unlocked until the AI searches for it via search_tools_and_skills.
+    let mut unlocked_tools: std::collections::HashSet<String> = if request.tools_search {
+        std::collections::HashSet::new()
+    } else {
+        all_tool_defs.keys().cloned().collect()
+    };
+    let mut unlocked_skill_ids: std::collections::HashSet<String> = if request.tools_search {
+        std::collections::HashSet::new()
+    } else {
+        skill_entries.iter().map(|(meta, _)| meta.id.clone()).collect()
+    };
     let has_user_prompt = has_parameters && !request.prompt.trim().is_empty();
-    let skill_prompts = load_skill_prompts(&request.skills);
+    // Skills injected into the initial system messages (only the ones unlocked at start).
+    let skill_prompts: Vec<(String, String)> = skill_entries
+        .iter()
+        .filter(|(meta, _)| unlocked_skill_ids.contains(&meta.id))
+        .map(|(meta, prompt)| (meta.name.clone(), prompt.clone()))
+        .collect();
+    let tools_search_hint = if request.tools_search {
+        let mut lines = Vec::new();
+        let mut tool_names: Vec<&String> = all_tool_defs.keys().collect();
+        tool_names.sort();
+        for name in tool_names {
+            let desc = all_tool_defs[name]
+                .pointer("/function/description")
+                .and_then(Value::as_str)
+                .unwrap_or("");
+            let aliases = builtin_tool_aliases(name);
+            if aliases.is_empty() {
+                lines.push(format!("- [tool] {name}: {desc}"));
+            } else {
+                lines.push(format!("- [tool] {name}: {desc} (keywords: {})", aliases.join(", ")));
+            }
+        }
+        for (meta, _) in &skill_entries {
+            lines.push(format!("- [skill] {}: {}", meta.name, meta.description));
+        }
+        if lines.is_empty() {
+            String::new()
+        } else {
+            format!(
+                "\n\nSKILLS/TOOLS SEARCH is on: none of the following are loaded yet. Call search_tools_and_skills with a keyword (any single word from the name, description, or the keywords list below is enough — no need for an exact phrase) to unlock what you actually need before using it:\n{}",
+                lines.join("\n")
+            )
+        }
+    } else {
+        String::new()
+    };
     let memory_history = if request.memory && !request.item_code.is_empty() {
         load_memory_messages(&request.working_directory, &request.item_code)
     } else {
@@ -2789,7 +2899,7 @@ async fn execute_agent_with_tools(
             .replace("{workspace_line}", &workspace_line);
         messages.push(serde_json::json!({
             "role": "system",
-            "content": builtin_instruction
+            "content": format!("{builtin_instruction}{tools_search_hint}")
         }));
         messages.extend(memory_history.iter().cloned());
         messages.push(serde_json::json!({ "role": "user", "content": input }));
@@ -2840,10 +2950,21 @@ async fn execute_agent_with_tools(
             }
         }
 
+        let active_tools: Vec<Value> = if request.tools_search {
+            let mut tools = vec![search_tool_def.clone()];
+            tools.extend(
+                unlocked_tools
+                    .iter()
+                    .filter_map(|name| all_tool_defs.get(name).cloned()),
+            );
+            tools
+        } else {
+            all_tool_defs.values().cloned().collect()
+        };
         let mut body = serde_json::json!({
             "model": request.model_name,
             "messages": messages.clone(),
-            "tools": active_tools.clone(),
+            "tools": active_tools,
             "tool_choice": tool_choice,
             "parallel_tool_calls": false,
             "stream": false
@@ -3000,6 +3121,7 @@ async fn execute_agent_with_tools(
         }
 
         messages.push(message);
+        let mut skills_to_inject: Vec<(String, String)> = Vec::new();
         for tool_call in tool_calls {
             let call_id = tool_call
                 .get("id")
@@ -3019,6 +3141,75 @@ async fn execute_agent_with_tools(
                 .unwrap_or_else(|_| serde_json::json!({}));
             let result = if let Err(error) = parsed_arguments {
                 format!("Error: {error}. 請用有效 JSON 重新呼叫工具，並把 timeout_seconds 放在 args 陣列外層。")
+            } else if request.tools_search && name == "search_tools_and_skills" {
+                let query = arguments
+                    .get("query")
+                    .and_then(Value::as_str)
+                    .unwrap_or("")
+                    .trim()
+                    .to_lowercase();
+                if query.is_empty() {
+                    "Error: search_tools_and_skills 的 query 不可為空，請提供關鍵字（例如工具名稱或想達成的功能）。".to_string()
+                } else {
+                    // Multi-word queries ("execute command", "git commit") must match on ANY
+                    // meaningful token, not the whole phrase — otherwise almost nothing matches.
+                    let tokens: Vec<String> = query
+                        .split(|c: char| !c.is_alphanumeric())
+                        .filter(|s| s.len() >= 2)
+                        .map(|s| s.to_string())
+                        .collect();
+                    let matches_text = |haystack: &str| -> bool {
+                        haystack.contains(&query) || tokens.iter().any(|t| haystack.contains(t.as_str()))
+                    };
+                    let mut matched_tools: Vec<String> = Vec::new();
+                    let mut tool_names: Vec<&String> = all_tool_defs.keys().collect();
+                    tool_names.sort();
+                    for tool_name in tool_names {
+                        let def = &all_tool_defs[tool_name];
+                        let desc = def
+                            .pointer("/function/description")
+                            .and_then(Value::as_str)
+                            .unwrap_or("");
+                        let aliases = builtin_tool_aliases(tool_name).join(" ");
+                        let haystack = format!("{tool_name} {desc} {aliases}").to_lowercase();
+                        if matches_text(&haystack) {
+                            matched_tools.push(format!("{tool_name}: {desc}"));
+                            unlocked_tools.insert(tool_name.clone());
+                        }
+                    }
+                    let mut matched_skills: Vec<String> = Vec::new();
+                    for (meta, prompt) in &skill_entries {
+                        let haystack = format!("{} {} {}", meta.id, meta.name, meta.description).to_lowercase();
+                        if matches_text(&haystack) {
+                            matched_skills.push(format!("{}: {}", meta.name, meta.description));
+                            if unlocked_skill_ids.insert(meta.id.clone()) {
+                                skills_to_inject.push((meta.name.clone(), prompt.clone()));
+                            }
+                        }
+                    }
+                    if matched_tools.is_empty() && matched_skills.is_empty() {
+                        let mut all_names: Vec<&String> = all_tool_defs.keys().collect();
+                        all_names.sort();
+                        let skill_names: Vec<&str> =
+                            skill_entries.iter().map(|(m, _)| m.name.as_str()).collect();
+                        format!(
+                            "找不到符合關鍵字「{query}」的工具或 skill。可用工具名稱：{}；可用 Skills：{}。請直接用上述其中一個確切名稱再搜尋一次。",
+                            all_names.iter().map(|s| s.as_str()).collect::<Vec<_>>().join(", "),
+                            if skill_names.is_empty() { "（無）".to_string() } else { skill_names.join(", ") }
+                        )
+                    } else {
+                        let mut parts = Vec::new();
+                        if !matched_tools.is_empty() {
+                            parts.push(format!("符合的工具（已解鎖，下一輪可直接呼叫）：\n{}", matched_tools.join("\n")));
+                        }
+                        if !matched_skills.is_empty() {
+                            parts.push(format!("符合的 Skills（已載入為額外指示）：\n{}", matched_skills.join("\n")));
+                        }
+                        parts.join("\n\n")
+                    }
+                }
+            } else if request.tools_search && !unlocked_tools.contains(name) {
+                format!("Error: 工具「{name}」尚未解鎖。請先呼叫 search_tools_and_skills 搜尋並解鎖後再呼叫。")
             } else if all_tool_defs.contains_key(name) && !mcp_tool_map.contains_key(name) {
                 // Built-in tool. MCP tools also live in the catalog, so exclude them
                 // here — they're handled below.
@@ -3096,6 +3287,9 @@ async fn execute_agent_with_tools(
                 "content": result
             }));
         }
+        for (_, skill_content) in skills_to_inject {
+            messages.push(serde_json::json!({ "role": "system", "content": skill_content }));
+        }
         round_index += 1;
 
         // 等這一輪（含工具呼叫）完全跑完才檢查暫停請求，確保不會中斷一半的模型回應或工具執行。
@@ -3160,7 +3354,10 @@ async fn execute_agent(
         None => return Err("沒有可傳送的 Prompt 或 HTTP 輸入參數".to_string()),
     };
 
-    if !request.tools.is_empty() || request.mcp_servers.iter().any(|s| s.enabled) {
+    if !request.tools.is_empty()
+        || request.mcp_servers.iter().any(|s| s.enabled)
+        || request.tools_search
+    {
         let res =
             execute_agent_with_tools(&app_handle, &request, base_url, input, has_parameters).await;
         if let Ok(mut map) = pending_agent_messages().lock() {

@@ -1,4 +1,4 @@
-<!doctype html>
+﻿<!doctype html>
 <html lang="zh-TW">
   <head>
     <meta charset="UTF-8" />
@@ -156,19 +156,17 @@
             <p class="tool-hint">只有勾選的工具會提供給 AI；所有檔案操作都限制在設定的工作目錄內。</p>
           </fieldset>
 
-          <fieldset class="memory-group">
-            <legend>Memory</legend>
-            <div class="memory-toggle-content">
-              <label class="tool-option">
+          <fieldset class="rounds-group">
+            <legend>AGENT FUNCTIONS</legend>
+            <div class="rounds-group-content">
+              <label class="form-checkbox-option">
                 <input type="checkbox" id="input-memory" />
                 記憶功能（執行時自動攜帶上次對話歷史）
               </label>
-            </div>
-          </fieldset>
-
-          <fieldset class="rounds-group">
-            <legend>輪數上限</legend>
-            <div class="rounds-content">
+              <label class="form-checkbox-option">
+                <input type="checkbox" id="input-tools-search" />
+                SKILLS/TOOLS SEARCH（預設不帶入 Skills 與 Tools，改為依需求即時搜尋後才載入 context）
+              </label>
               <label class="form-label" for="input-max-rounds">最大對話輪數（含 tool-call 來回）</label>
               <input type="number" id="input-max-rounds" class="form-input" min="1" step="1" placeholder="100" />
               <p class="tool-hint">超過此輪數後會自動終止執行。預設 100。</p>

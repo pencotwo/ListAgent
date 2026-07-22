@@ -1,4 +1,4 @@
-/* ============================================================
+﻿/* ============================================================
    ListAgent — 全域樣式
    ============================================================ */
 
@@ -1301,15 +1301,25 @@ body.theme-glass-neon #list-container.card-layout .item-card.selected {
   text-transform: uppercase;
 }
 
-.memory-toggle-content {
-  display: flex;
-  align-items: center;
-}
-
-.rounds-content {
+.rounds-group-content {
   display: flex;
   flex-direction: column;
-  gap: 6px;
+  gap: 12px;
+}
+
+.form-checkbox-option {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  min-width: 0;
+  color: var(--text-primary);
+  font-family: var(--sans);
+  font-size: 13px;
+  cursor: pointer;
+}
+
+.form-checkbox-option input {
+  accent-color: var(--accent);
 }
 
 .mcp-tool-section {
