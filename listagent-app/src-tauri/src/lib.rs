@@ -2796,10 +2796,32 @@ async fn execute_agent_with_tools(
                         mcp_tool_definitions.extend(openai_tools);
                         mcp_clients.push((server.name.clone(), client));
                     }
-                    Err(e) => eprintln!("MCP {} tools/list 失敗：{e}", server.name),
+                    Err(e) => {
+                        let message = format!("MCP 伺服器「{}」列出工具失敗：{e}", server.name);
+                        eprintln!("{message}");
+                        emit_model_exchange(
+                            app_handle,
+                            request,
+                            0,
+                            "mcp_error",
+                            &endpoint,
+                            serde_json::json!({ "message": message }),
+                        );
+                    }
                 }
             }
-            Err(e) => eprintln!("MCP {} 初始化失敗：{e}", server.name),
+            Err(e) => {
+                let message = format!("MCP 伺服器「{}」初始化失敗：{e}", server.name);
+                eprintln!("{message}");
+                emit_model_exchange(
+                    app_handle,
+                    request,
+                    0,
+                    "mcp_error",
+                    &endpoint,
+                    serde_json::json!({ "message": message }),
+                );
+            }
         }
     }
     // Build a catalog of every tool definition keyed by name.

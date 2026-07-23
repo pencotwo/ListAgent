@@ -121,14 +121,14 @@ interface PausedTaskInfo {
 interface ModelExchangeEvent {
   itemId: number
   round: number
-  phase: 'request' | 'response' | 'tool' | 'error' | 'user_input' | 'command_output'
+  phase: 'request' | 'response' | 'tool' | 'error' | 'mcp_error' | 'user_input' | 'command_output'
   endpoint: string
   payload: unknown
 }
 
 interface SessionExchange {
   round: number
-  phase: 'request' | 'response' | 'tool' | 'error' | 'user_input' | 'command_output'
+  phase: 'request' | 'response' | 'tool' | 'error' | 'mcp_error' | 'user_input' | 'command_output'
   endpoint: string
   payload: unknown
   timestamp: number
@@ -463,6 +463,7 @@ function recordModelExchange(exchange: ModelExchangeEvent): void {
     response: '← AI Model 回應',
     tool: '⚙ Tool 執行',
     error: '✖ AI Model 錯誤',
+    mcp_error: '⚠ MCP 錯誤',
     user_input: '💬 使用者插話',
     command_output: '🖥 Command 輸出',
   } as const
@@ -471,6 +472,7 @@ function recordModelExchange(exchange: ModelExchangeEvent): void {
     response: 'success',
     tool: 'system',
     error: 'error',
+    mcp_error: 'error',
     user_input: 'info',
     command_output: 'system',
   }
@@ -1982,6 +1984,10 @@ function makeSimpleExchangeEntry(
     case 'error': {
       const message = (p.message as string) ?? String(payload)
       return { level: 'error', message: `✖ AI 模型錯誤：${message}`, timestamp, kind: 'simple' }
+    }
+    case 'mcp_error': {
+      const message = (p.message as string) ?? String(payload)
+      return { level: 'error', message: `⚠ MCP 錯誤：${message}`, timestamp, kind: 'simple' }
     }
     default:
       return null
