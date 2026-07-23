@@ -19,6 +19,7 @@ fn default_max_rounds() -> u32 {
     100
 }
 const MAX_TOOL_FILE_SIZE: u64 = 1024 * 1024;
+const READ_FILE_DEFAULT_LIMIT: usize = 2000;
 const MAX_SEARCH_RESULTS: usize = 200;
 const MAX_SEARCH_FILES: usize = 5000;
 const MAX_SEARCH_DURATION_MS: u64 = 8000;
@@ -1011,10 +1012,14 @@ fn tool_definitions(selected: &[String]) -> Result<Vec<Value>, String> {
                 "type": "function",
                 "function": {
                     "name": "read_file",
-                    "description": "Read a UTF-8 text file from the workspace.",
+                    "description": "Read a UTF-8 text file from the workspace. Returns at most 2000 lines per call — for larger files, page through with offset/limit instead of assuming the whole file fits in one call.",
                     "parameters": {
                         "type": "object",
-                        "properties": { "path": { "type": "string" } },
+                        "properties": {
+                            "path": { "type": "string" },
+                            "offset": { "type": "integer", "description": "1-indexed line number to start reading from. Defaults to 1." },
+                            "limit": { "type": "integer", "description": "Maximum number of lines to return. Defaults to 2000." }
+                        },
                         "required": ["path"],
                         "additionalProperties": false
                     }
@@ -1875,7 +1880,36 @@ fn execute_tool(
             if !metadata.is_file() || metadata.len() > MAX_TOOL_FILE_SIZE {
                 return Err("read_file 僅支援 1 MB 以下的文字檔".to_string());
             }
-            fs::read_to_string(path).map_err(|error| format!("無法讀取 UTF-8 文字檔：{error}"))
+            let content = fs::read_to_string(&path)
+                .map_err(|error| format!("無法讀取 UTF-8 文字檔：{error}"))?;
+
+            let offset_given = arguments.get("offset").and_then(Value::as_u64);
+            let limit_given = arguments.get("limit").and_then(Value::as_u64);
+            let offset = offset_given.unwrap_or(1).max(1) as usize;
+            let limit = limit_given.unwrap_or(READ_FILE_DEFAULT_LIMIT as u64) as usize;
+
+            let lines: Vec<&str> = content.lines().collect();
+            let total_lines = lines.len();
+
+            // 未指定 offset/limit 且檔案本身不長：直接回傳全文，維持簡單案例的行為不變
+            if offset_given.is_none() && limit_given.is_none() && total_lines <= READ_FILE_DEFAULT_LIMIT {
+                return Ok(content);
+            }
+
+            let start = (offset - 1).min(total_lines);
+            let end = start.saturating_add(limit).min(total_lines);
+            let mut result = lines[start..end].join("\n");
+            if start >= total_lines {
+                result = format!("[檔案共 {total_lines} 行，offset {offset} 已超出範圍]");
+            } else if end < total_lines {
+                result.push_str(&format!(
+                    "\n\n[已截斷：顯示第 {}-{} 行，檔案共 {} 行。如需其餘內容，請帶 offset/limit 參數再次呼叫 read_file。]",
+                    start + 1,
+                    end,
+                    total_lines
+                ));
+            }
+            Ok(result)
         }
         "write_file" => {
             let path = resolve_write_tool_path(root, required_string(arguments, "path")?)?;
@@ -4261,6 +4295,65 @@ mod tests {
                 &serde_json::json!({ "path": unique }),
             )?;
             assert!(listing.contains("sample.txt"));
+            Ok(())
+        })();
+
+        fs::remove_dir_all(directory).unwrap();
+        result.unwrap();
+    }
+
+    #[test]
+    fn read_file_pages_with_offset_and_limit() {
+        let root = std::env::current_dir().unwrap().canonicalize().unwrap();
+        let unique = format!(
+            "target/tool-test-paging-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        );
+        let directory = root.join(&unique);
+        fs::create_dir_all(&directory).unwrap();
+
+        let result = (|| -> Result<(), String> {
+            let file = format!("{unique}/lines.txt");
+            let lines: Vec<String> = (1..=10).map(|i| format!("line{i}")).collect();
+            execute_tool(
+                None,
+                &root,
+                "write_file",
+                &serde_json::json!({ "path": file.clone(), "content": lines.join("\n") }),
+            )?;
+
+            // 未指定 offset/limit：短檔案照舊回傳全文
+            let whole = execute_tool(
+                None,
+                &root,
+                "read_file",
+                &serde_json::json!({ "path": file.clone() }),
+            )?;
+            assert_eq!(whole, lines.join("\n"));
+
+            // 指定 offset/limit：只回傳該範圍，並附上截斷提示
+            let paged = execute_tool(
+                None,
+                &root,
+                "read_file",
+                &serde_json::json!({ "path": file.clone(), "offset": 3, "limit": 2 }),
+            )?;
+            assert!(paged.starts_with("line3\nline4"));
+            assert!(paged.contains("已截斷"));
+            assert!(!paged.contains("line5"));
+
+            // offset 超出檔案範圍
+            let out_of_range = execute_tool(
+                None,
+                &root,
+                "read_file",
+                &serde_json::json!({ "path": file, "offset": 100, "limit": 2 }),
+            )?;
+            assert!(out_of_range.contains("超出範圍"));
             Ok(())
         })();
 
