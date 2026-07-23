@@ -701,10 +701,11 @@ const btnSendMessage = document.getElementById('btn-send-message') as HTMLButton
 
 
 // 分隔條元素
-const splitter = document.getElementById('splitter') as HTMLElement
+const appEl = document.getElementById('app') as HTMLElement
 const messageBox = document.getElementById('message-box') as HTMLElement
 const vsplitter = document.getElementById('vsplitter') as HTMLElement
 const sessionHistoryPanel = document.getElementById('session-history-panel') as HTMLElement
+const leftSplitter = document.getElementById('left-splitter') as HTMLElement
 
 // Skills 清單（設定對話框開啟時從後端載入）
 let availableSkills: SkillMeta[] = []
@@ -713,23 +714,17 @@ let availableSkills: SkillMeta[] = []
 const btnViewToggle = document.getElementById('btn-view-toggle') as HTMLButtonElement
 let viewDetailed = false
 
-// 卡片／列表檢視切換
-const btnListViewToggle = document.getElementById('btn-list-view-toggle') as HTMLButtonElement
-type ViewMode = 'card' | 'list' | 'left'
-const VIEW_MODE_KEY = 'listagent_view_mode'
-let listViewMode: ViewMode = 'card'
-
-// 水平分隔條拖曳狀態
-let splitterDragging = false
-let splitterStartY = 0
-let splitterStartHeight = 0
-const SPLITTER_HEIGHT_KEY = 'listagent_splitter_height'
-
 // 垂直分隔條拖曳狀態
 let vsplitterDragging = false
 let vsplitterStartX = 0
 let vsplitterStartWidth = 0
 const VSPLITTER_WIDTH_KEY = 'listagent_vsplitter_width'
+
+// 左側面板寬度拖曳狀態
+let leftSplitterDragging = false
+let leftSplitterStartX = 0
+let leftSplitterStartWidth = 0
+const LEFT_PANEL_WIDTH_KEY = 'listagent_left_panel_width'
 
 // ============================================================
 // 渲染函式
@@ -748,140 +743,10 @@ function renderList(): void {
   emptyState.classList.add('hidden')
   listContainer.classList.remove('hidden')
 
-  // 切換容器佈局模式
-  if (listViewMode === 'card') {
-    listContainer.classList.add('card-layout')
-  } else {
-    listContainer.classList.remove('card-layout')
-  }
-
-  const useList = listViewMode === 'list' || listViewMode === 'left'
-
-  if (useList) {
-    items.forEach((item) => {
-      const row = createItemListRow(item)
-      listContainer.appendChild(row)
-    })
-  } else {
-    items.forEach((item) => {
-      const card = createItemCard(item)
-      listContainer.appendChild(card)
-    })
-  }
-}
-
-/** 建立單一項目卡片 */
-function createItemCard(item: ListItem): HTMLElement {
-  const card = document.createElement('div')
-  card.className = 'item-card'
-  card.dataset.id = String(item.id)
-
-  // 若目前選中此項目，套用 selected 樣式
-  if (selectedItemId === item.id) {
-    card.classList.add('selected')
-  }
-
-  // 若此項目正在執行中，套用執行中樣式
-  if (runningItems.has(item.id)) {
-    card.classList.add('has-running-agent')
-  }
-
-  const itemEvents = scheduledEvents.filter((event) => event.agentId === item.id)
-  const activeEvents = itemEvents.filter((event) => event.recurrence === 'interval' || !event.executedAt)
-  const eventIcon = document.createElement('span')
-  if (itemEvents.length > 0) {
-    eventIcon.className = `item-event-icon${activeEvents.length > 0 ? ' active' : ''}`
-    eventIcon.textContent = '⏰'
-    eventIcon.title = `事件：${itemEvents.length}（待執行／循環：${activeEvents.length}）`
-  }
-
-  // 項目資訊
-  const info = document.createElement('div')
-  info.className = 'item-info'
-
-  const nameEl = document.createElement('span')
-  nameEl.className = 'item-name'
-  nameEl.textContent = item.name
-
-  const metaEl = document.createElement('span')
-  metaEl.className = 'item-meta'
-  metaEl.textContent = formatMeta(item)
-
-  info.appendChild(nameEl)
-  info.appendChild(metaEl)
-
-  // 執行狀態的轉圈圈（放在按鈕左邊；running=1 + queued=N 個）
-  const spinners = document.createElement('span')
-  spinners.className = 'run-spinners'
-  renderSpinners(spinners, item.id)
-
-  // 執行按鈕（永遠是 ▶️，即使在跑也能按 → 進 queue）
-  const runBtn = document.createElement('button')
-  runBtn.className = 'btn-run'
-  runBtn.innerHTML = '▶️'
-  runBtn.title = runningItems.has(item.id) ? '再按會加入 Queue' : '執行'
-  runBtn.addEventListener('click', (e) => {
-    e.stopPropagation()
-    void runItem(item.id)
+  items.forEach((item) => {
+    const row = createItemListRow(item)
+    listContainer.appendChild(row)
   })
-
-  // 暫停／繼續按鈕
-  const pauseBtn = createPauseButton(item)
-
-  // 底部列：spinners + run button + pause button
-  const bottomRow = document.createElement('div')
-  bottomRow.className = 'card-bottom-row'
-  bottomRow.appendChild(spinners)
-  bottomRow.appendChild(pauseBtn)
-  bottomRow.appendChild(runBtn)
-
-  // 右側：齒輪按鈕
-  const gearBtn = document.createElement('button')
-  gearBtn.className = 'btn-gear'
-  gearBtn.title = '設定'
-  gearBtn.innerHTML = '⚙️'
-  gearBtn.addEventListener('click', (e) => {
-    e.stopPropagation()
-    openSettingsDialog(item.id)
-  })
-
-  // 滑鼠懸停效果：顯示齒輪按鈕
-  card.addEventListener('mouseenter', () => {
-    gearBtn.classList.add('visible')
-  })
-  card.addEventListener('mouseleave', () => {
-    gearBtn.classList.remove('visible')
-  })
-
-  // 點擊卡片本身 → 選取項目，顯示執行過程
-  card.addEventListener('click', () => {
-    selectItem(item.id)
-  })
-
-  // 在底部列加入狀態圖示（左下角）
-  if (itemEvents.length > 0) bottomRow.appendChild(eventIcon)
-  if (item.allowHttp) {
-    const httpIcon = document.createElement('span')
-    httpIcon.className = 'item-event-icon active'
-    httpIcon.textContent = '🌐'
-    httpIcon.title = '允許透過 HTTP 請求執行此 Agent 任務'
-    bottomRow.appendChild(httpIcon)
-  }
-  const itemMappings = eventMappings.filter((m) => m.agentId === item.id)
-  if (itemMappings.length > 0) {
-    const mappingIcon = document.createElement('span')
-    mappingIcon.className = 'item-event-icon active'
-    mappingIcon.textContent = '🔗'
-    mappingIcon.title = `事件訂閱：已訂閱 ${itemMappings.length} 個自訂事件（${itemMappings.map(m => m.eventId).join(', ')}）`
-    bottomRow.appendChild(mappingIcon)
-  }
-
-  // 組裝卡片（順序：資訊 → 底部 → 齒輪）
-  card.appendChild(info)
-  card.appendChild(bottomRow)
-  card.appendChild(gearBtn)
-
-  return card
 }
 
 /** 建立單一項目列表列（精簡模式） */
@@ -1055,7 +920,7 @@ function cancelQueuedTask(itemId: number, idx: number): void {
   itemLogs.set(itemId, logs)
   syncAgentStatus()
   // 重繪這張 card 的 spinner；也刷新 message box 讓 log 立即顯示
-  const card = document.querySelector(`.item-card[data-id="${itemId}"], .item-list-row[data-id="${itemId}"]`) as HTMLElement | null
+  const card = document.querySelector(`.item-list-row[data-id="${itemId}"]`) as HTMLElement | null
   if (card) {
     const spinners = card.querySelector('.run-spinners') as HTMLElement | null
     if (spinners) renderSpinners(spinners, itemId)
@@ -1098,7 +963,7 @@ function selectItem(id: number): void {
   viewingSessionPath = null
 
   // 重新渲染以更新卡片 selected 樣式
-  document.querySelectorAll('.item-card, .item-list-row').forEach((card) => {
+  document.querySelectorAll('.item-list-row').forEach((card) => {
     const cardId = Number((card as HTMLElement).dataset.id)
     if (cardId === id) {
       card.classList.add('selected')
@@ -1541,7 +1406,7 @@ async function resumeItem(id: number): Promise<void> {
 }
 
 function updateCardRunButton(id: number, running: boolean): void {
-  const card = document.querySelector(`.item-card[data-id="${id}"], .item-list-row[data-id="${id}"]`) as HTMLElement | null
+  const card = document.querySelector(`.item-list-row[data-id="${id}"]`) as HTMLElement | null
   if (!card) return
 
   const spinners = card.querySelector('.run-spinners') as HTMLElement | null
@@ -1617,29 +1482,15 @@ function updateViewToggleUI(): void {
   btnViewToggle.textContent = viewDetailed ? '詳細' : '簡化'
 }
 
-/** 更新列表檢視切換按鈕的視覺狀態 */
+/** 啟用左側面板佈局（永久生效） */
 function applyLeftLayout(): void {
-  const app = document.getElementById('app')!
-  if (listViewMode === 'left') {
-    app.classList.add('left-layout')
-  } else {
-    app.classList.remove('left-layout')
-  }
-}
-
-function updateListViewToggleUI(): void {
-  if (listViewMode === 'left') {
-    btnListViewToggle.textContent = '🫧'
-    btnListViewToggle.classList.add('active')
-    btnListViewToggle.title = '切換為卡片顯示'
-  } else if (listViewMode === 'list') {
-    btnListViewToggle.textContent = '🫧'
-    btnListViewToggle.classList.add('active')
-    btnListViewToggle.title = '切換為左側顯示'
-  } else {
-    btnListViewToggle.textContent = '🫧'
-    btnListViewToggle.classList.remove('active')
-    btnListViewToggle.title = '切換為列表顯示'
+  appEl.classList.add('left-layout')
+  const savedWidth = localStorage.getItem(LEFT_PANEL_WIDTH_KEY)
+  if (savedWidth) {
+    const w = parseInt(savedWidth, 10)
+    if (!isNaN(w) && w >= 180 && w <= window.innerWidth * 0.5) {
+      appEl.style.gridTemplateColumns = w + 'px 5px 1fr'
+    }
   }
 }
 
@@ -4197,53 +4048,53 @@ document.addEventListener('keydown', (e) => {
 })
 
 // ============================================================
-// 分隔條拖曳邏輯
+// 左側面板分隔條拖曳邏輯
 // ============================================================
 
-/** 開始拖曳分隔條 */
-function onSplitterMouseDown(e: MouseEvent): void {
+/** 開始拖曳左側面板分隔條 */
+function onLeftSplitterMouseDown(e: MouseEvent): void {
   e.preventDefault()
-  splitterDragging = true
-  splitterStartY = e.clientY
-  splitterStartHeight = messageBox.offsetHeight
-  splitter.classList.add('active')
-  document.body.style.cursor = 'row-resize'
+  leftSplitterDragging = true
+  leftSplitterStartX = e.clientX
+  leftSplitterStartWidth = listContainer.offsetWidth
+  leftSplitter.classList.add('active')
+  document.body.style.cursor = 'col-resize'
   document.body.style.userSelect = 'none'
 }
 
-/** 拖曳分隔條中 */
-function onSplitterMouseMove(e: MouseEvent): void {
-  if (!splitterDragging) return
+/** 拖曳左側面板分隔條中 */
+function onLeftSplitterMouseMove(e: MouseEvent): void {
+  if (!leftSplitterDragging) return
 
-  const deltaY = splitterStartY - e.clientY // 向上拖為正值（擴大訊息框）
-  const newHeight = splitterStartHeight + deltaY
+  const deltaX = e.clientX - leftSplitterStartX
+  const newWidth = leftSplitterStartWidth + deltaX
 
-  // 限制範圍：最小 48px，最大 90vh
-  const maxHeight = window.innerHeight * 0.9
-  const clampedHeight = Math.max(48, Math.min(maxHeight, newHeight))
+  // 限制範圍：最小 180px，最大視窗寬度的一半
+  const maxWidth = window.innerWidth * 0.5
+  const clampedWidth = Math.max(180, Math.min(maxWidth, newWidth))
 
-  messageBox.style.height = `${clampedHeight}px`
+  appEl.style.gridTemplateColumns = `${clampedWidth}px 5px 1fr`
 }
 
-/** 結束拖曳分隔條 */
-function onSplitterMouseUp(): void {
-  if (!splitterDragging) return
+/** 結束拖曳左側面板分隔條 */
+function onLeftSplitterMouseUp(): void {
+  if (!leftSplitterDragging) return
 
-  splitterDragging = false
-  splitter.classList.remove('active')
+  leftSplitterDragging = false
+  leftSplitter.classList.remove('active')
   document.body.style.cursor = ''
   document.body.style.userSelect = ''
 
-  // 儲存使用者偏好的高度
+  // 儲存使用者偏好的寬度
   try {
-    localStorage.setItem(SPLITTER_HEIGHT_KEY, String(messageBox.offsetHeight))
+    localStorage.setItem(LEFT_PANEL_WIDTH_KEY, String(listContainer.offsetWidth))
   } catch { /* 忽略 */ }
 }
 
-// 繫結水平分隔條事件
-splitter.addEventListener('mousedown', onSplitterMouseDown)
-document.addEventListener('mousemove', onSplitterMouseMove)
-document.addEventListener('mouseup', onSplitterMouseUp)
+// 繫結左側面板分隔條事件
+leftSplitter.addEventListener('mousedown', onLeftSplitterMouseDown)
+document.addEventListener('mousemove', onLeftSplitterMouseMove)
+document.addEventListener('mouseup', onLeftSplitterMouseUp)
 
 // ============================================================
 // 垂直分隔條拖曳邏輯
@@ -4297,19 +4148,7 @@ btnViewToggle.addEventListener('click', () => {
   }
 })
 
-// ============================================================
-// 卡片／列表檢視切換
-// ============================================================
 
-btnListViewToggle.addEventListener('click', () => {
-  if (listViewMode === 'card') listViewMode = 'list'
-  else if (listViewMode === 'list') listViewMode = 'left'
-  else listViewMode = 'card'
-  applyLeftLayout()
-  updateListViewToggleUI()
-  try { localStorage.setItem(VIEW_MODE_KEY, listViewMode) } catch { /* ignore */ }
-  renderList()
-})
 
 // ============================================================
 // 主題切換 (Design Variations / Theme Switching)
@@ -4411,15 +4250,6 @@ if (selectTheme) {
     await drainHttpInputs()
   }
 
-  // 還原使用者偏好的訊息框高度
-  const savedHeight = localStorage.getItem(SPLITTER_HEIGHT_KEY)
-  if (savedHeight) {
-    const h = parseInt(savedHeight, 10)
-    if (!isNaN(h) && h >= 48 && h <= window.innerHeight * 0.9) {
-      messageBox.style.height = `${h}px`
-    }
-  }
-
   // 還原使用者偏好的垂直分隔條位置
   const savedVWidth = localStorage.getItem(VSPLITTER_WIDTH_KEY)
   if (savedVWidth) {
@@ -4429,14 +4259,7 @@ if (selectTheme) {
     }
   }
 
-  // 還原使用者偏好的檢視模式
-  try {
-    const saved = localStorage.getItem(VIEW_MODE_KEY)
-    if (saved === 'card' || saved === 'list' || saved === 'left') listViewMode = saved
-  } catch { /* ignore */ }
-
   updateViewToggleUI()
-  updateListViewToggleUI()
   applyLeftLayout()
   await restorePausedTasks()
   renderList()

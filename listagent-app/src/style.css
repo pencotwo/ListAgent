@@ -132,37 +132,19 @@ body {
 }
 
 #btn-events,
-#btn-global-settings,
-#btn-list-view-toggle {
+#btn-global-settings {
   border: 1px solid var(--border);
   font-size: 16px;
 }
 
 #btn-events:hover,
-#btn-global-settings:hover,
-#btn-list-view-toggle:hover {
+#btn-global-settings:hover {
   border-color: var(--accent);
   background: var(--accent-light);
   transform: scale(1.08);
 }
 
-#btn-list-view-toggle {
-  width: 36px;
-  height: 36px;
-  border-radius: 50%;
-  background: transparent;
-  color: var(--accent);
-  cursor: pointer;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  transition: all 0.2s ease;
-}
 
-#btn-list-view-toggle.active {
-  background: var(--accent-light);
-  border-color: var(--accent);
-}
 
 /* '+' 按鈕 */
 #btn-add {
@@ -545,47 +527,8 @@ body {
 }
 
 /* ============================================================
-   項目卡片
+   項目資訊與操作按鈕（列表列共用樣式）
    ============================================================ */
-
-.item-card {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-  padding: 14px 16px;
-  background: var(--bg-surface);
-  border: 1px solid var(--border);
-  border-radius: var(--radius);
-  cursor: pointer;
-  transition: all 0.2s ease;
-  user-select: none;
-}
-
-.item-card:hover {
-  border-color: var(--accent);
-  box-shadow: var(--shadow-sm);
-  transform: translateY(-1px);
-}
-
-.item-card:active {
-  transform: scale(0.995);
-}
-
-.item-code {
-  flex: 0 0 auto;
-  min-width: 42px;
-  padding: 4px 6px;
-  border: 1px solid var(--border);
-  border-radius: var(--radius-sm);
-  background: var(--bg-base);
-  color: var(--accent);
-  font-family: ui-monospace, SFMono-Regular, Consolas, monospace;
-  font-size: 12px;
-  font-weight: 700;
-  line-height: 1;
-  letter-spacing: 0.08em;
-  text-align: center;
-}
 
 /* 項目資訊 */
 .item-info {
@@ -802,162 +745,6 @@ body {
     box-shadow: 0 4px 12px rgba(0, 0, 0, 0.15);
   }
   .queue-item-menu-btn { color: #1e293b; }
-}
-
-/* 卡片上有 agent 正在執行時的視覺提示 */
-.item-card.has-running-agent {
-  border-left: 3px solid var(--accent);
-  background: linear-gradient(90deg, var(--accent-light) 0%, transparent 8%);
-}
-
-@media (prefers-color-scheme: dark) {
-  .item-card.has-running-agent {
-    background: linear-gradient(90deg, rgba(129, 140, 248, 0.15) 0%, transparent 8%);
-  }
-}
-
-/* 選中狀態 */
-.item-card.selected {
-  border-color: var(--accent);
-  background: var(--accent-light);
-  box-shadow: 0 0 0 3px var(--accent-light);
-}
-
-.item-card.selected .item-name {
-  color: var(--accent);
-}
-
-/* ============================================================
-   卡片網格佈局（Card Grid Layout）— 16:9 寬高比
-   ============================================================ */
-
-#list-container.card-layout {
-  display: grid;
-  grid-template-columns: repeat(auto-fill, minmax(300px, 1fr));
-  gap: 12px;
-  align-content: start;
-}
-
-#list-container.card-layout .item-card {
-  aspect-ratio: 16 / 9;
-  flex-direction: column;
-  align-items: stretch;
-  padding: 14px 16px 12px;
-  gap: 6px;
-  position: relative;
-  overflow: hidden;
-}
-
-/* 卡片頂部：圖示列 */
-#list-container.card-layout .item-card .card-icons-row {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  flex-shrink: 0;
-}
-
-/* 卡片中間：名稱 + 描述 */
-#list-container.card-layout .item-card .item-info {
-  flex: 1;
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-  min-width: 0;
-  overflow: hidden;
-}
-
-#list-container.card-layout .item-card .item-name {
-  font-size: 16px;
-  font-weight: 700;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-#list-container.card-layout .item-card .item-meta {
-  font-size: 12px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  display: -webkit-box;
-  -webkit-line-clamp: 2;
-  -webkit-box-orient: vertical;
-  white-space: normal;
-  line-height: 1.4;
-}
-
-/* 卡片底部：spinners + run 按鈕 */
-#list-container.card-layout .item-card .card-bottom-row {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  flex-shrink: 0;
-  margin-top: auto;
-}
-
-#list-container.card-layout .item-card .card-bottom-row .run-spinners {
-  margin-right: 0;
-}
-
-/* 齒輪按鈕定位到右上角 */
-#list-container.card-layout .item-card .btn-gear {
-  position: absolute;
-  top: 8px;
-  right: 8px;
-  opacity: 0;
-  z-index: 2;
-}
-
-#list-container.card-layout .item-card .btn-gear.visible {
-  opacity: 1;
-}
-
-/* 執行按鈕在卡片模式微調 */
-#list-container.card-layout .item-card .btn-run {
-  margin-right: 0;
-}
-
-#list-container.card-layout .item-card .btn-pause {
-  margin-right: 0;
-}
-
-/* 卡片 hover 時仍保持原有動畫 */
-#list-container.card-layout .item-card:hover {
-  border-color: var(--accent);
-  box-shadow: var(--shadow-md);
-  transform: translateY(-2px);
-}
-
-#list-container.card-layout .item-card:active {
-  transform: scale(0.99);
-}
-
-/* 卡片執行中樣式微調 */
-#list-container.card-layout .item-card.has-running-agent {
-  border-left: 3px solid var(--accent);
-  background: linear-gradient(135deg, var(--accent-light) 0%, transparent 15%);
-}
-
-#list-container.card-layout .item-card.selected {
-  border-color: var(--accent);
-  background: var(--accent-light);
-  box-shadow: 0 0 0 3px var(--accent-light);
-}
-
-/* 主題覆寫：只針對 card-layout 內的 .item-card */
-body.theme-glass-neon #list-container.card-layout .item-card {
-  background: rgba(22, 19, 48, 0.45);
-  backdrop-filter: blur(10px);
-  border-color: rgba(255, 255, 255, 0.08);
-}
-body.theme-glass-neon #list-container.card-layout .item-card:hover {
-  border-color: var(--border-focus);
-  box-shadow: 0 0 16px rgba(0, 242, 254, 0.15);
-  transform: translateY(-2px);
-}
-body.theme-glass-neon #list-container.card-layout .item-card.selected {
-  border-color: var(--accent);
-  background: rgba(189, 0, 255, 0.15);
-  box-shadow: 0 0 20px rgba(189, 0, 255, 0.25);
 }
 
 /* ============================================================
@@ -1654,43 +1441,54 @@ body.theme-glass-neon #list-container.card-layout .item-card.selected {
 }
 
 /* ============================================================
-   分隔條 (Splitter)
+   左側面板分隔條 (Left Splitter)
    ============================================================ */
 
-.splitter {
-  flex-shrink: 0;
-  height: 6px;
-  cursor: row-resize;
-  background: var(--border);
+.left-splitter {
+  cursor: col-resize;
+  background: rgba(255, 255, 255, 0.08);
   transition: background 0.15s ease;
   position: relative;
   z-index: 10;
 }
 
-.splitter::after {
+.left-splitter::after {
   content: '';
   position: absolute;
-  left: 50%;
   top: 50%;
+  left: 50%;
   transform: translate(-50%, -50%);
-  width: 36px;
-  height: 3px;
+  height: 32px;
+  width: 3px;
   border-radius: 2px;
-  background: var(--text-muted);
+  background: rgba(255, 255, 255, 0.3);
   opacity: 0.5;
-  transition: opacity 0.15s ease, width 0.15s ease;
+  transition: opacity 0.15s ease, height 0.15s ease;
 }
 
-.splitter:hover,
-.splitter.active {
+.left-splitter:hover,
+.left-splitter.active {
   background: var(--accent);
 }
 
-.splitter:hover::after,
-.splitter.active::after {
+.left-splitter:hover::after,
+.left-splitter.active::after {
   opacity: 0.9;
-  width: 48px;
+  height: 48px;
   background: #fff;
+}
+
+@media (prefers-color-scheme: light) {
+  .left-splitter {
+    background: rgba(99, 102, 241, 0.12);
+  }
+  .left-splitter::after {
+    background: rgba(99, 102, 241, 0.4);
+  }
+  .left-splitter:hover::after,
+  .left-splitter.active::after {
+    background: var(--accent);
+  }
 }
 
 /* ============================================================
@@ -2373,19 +2171,19 @@ body.theme-glass-neon #toolbar {
   border-bottom: 1px solid rgba(255, 255, 255, 0.08);
 }
 
-body.theme-glass-neon .item-card {
+body.theme-glass-neon .item-list-row {
   background: rgba(22, 19, 48, 0.45);
   backdrop-filter: blur(10px);
   border-color: rgba(255, 255, 255, 0.08);
 }
 
-body.theme-glass-neon .item-card:hover {
+body.theme-glass-neon .item-list-row:hover {
   border-color: var(--border-focus);
   box-shadow: 0 0 16px rgba(0, 242, 254, 0.15);
   transform: translateY(-2px);
 }
 
-body.theme-glass-neon .item-card.selected {
+body.theme-glass-neon .item-list-row.selected {
   border-color: var(--accent);
   background: rgba(189, 0, 255, 0.15);
   box-shadow: 0 0 20px rgba(189, 0, 255, 0.25);
@@ -2466,18 +2264,18 @@ body.theme-cherry-blossom #toolbar {
   border-bottom-color: var(--border);
 }
 
-body.theme-cherry-blossom .item-card {
+body.theme-cherry-blossom .item-list-row {
   background: var(--bg-surface);
   border-color: var(--border);
   box-shadow: var(--shadow-sm);
 }
 
-body.theme-cherry-blossom .item-card:hover {
+body.theme-cherry-blossom .item-list-row:hover {
   border-color: var(--border-focus);
   background: var(--bg-hover);
 }
 
-body.theme-cherry-blossom .item-card.selected {
+body.theme-cherry-blossom .item-list-row.selected {
   border-color: var(--accent);
   background: #ffe4e6;
   box-shadow: 0 0 0 3px rgba(236, 72, 153, 0.15);
@@ -2572,18 +2370,18 @@ body.theme-cyberpunk-amber #app-title {
   text-transform: uppercase;
 }
 
-body.theme-cyberpunk-amber .item-card {
+body.theme-cyberpunk-amber .item-list-row {
   background: var(--bg-surface);
   border: 1px solid var(--border);
 }
 
-body.theme-cyberpunk-amber .item-card:hover {
+body.theme-cyberpunk-amber .item-list-row:hover {
   border-color: var(--border-focus);
   background: var(--bg-hover);
   transform: none;
 }
 
-body.theme-cyberpunk-amber .item-card.selected {
+body.theme-cyberpunk-amber .item-list-row.selected {
   border: 2px solid var(--accent);
   background: rgba(251, 133, 0, 0.08);
   box-shadow: 0 0 10px rgba(251, 133, 0, 0.3);
@@ -2685,19 +2483,19 @@ body.theme-midnight-forest #toolbar {
   border-bottom: 1px solid rgba(255, 255, 255, 0.08);
 }
 
-body.theme-midnight-forest .item-card {
+body.theme-midnight-forest .item-list-row {
   background: rgba(18, 43, 34, 0.45);
   backdrop-filter: blur(10px);
   border-color: rgba(255, 255, 255, 0.08);
 }
 
-body.theme-midnight-forest .item-card:hover {
+body.theme-midnight-forest .item-list-row:hover {
   border-color: var(--border-focus);
   box-shadow: 0 0 16px rgba(52, 211, 153, 0.15);
   transform: translateY(-2px);
 }
 
-body.theme-midnight-forest .item-card.selected {
+body.theme-midnight-forest .item-list-row.selected {
   border-color: var(--accent);
   background: rgba(16, 185, 129, 0.15);
   box-shadow: 0 0 20px rgba(16, 185, 129, 0.25);
@@ -2767,18 +2565,18 @@ body.theme-ocean-breeze #toolbar {
   border-bottom-color: var(--border);
 }
 
-body.theme-ocean-breeze .item-card {
+body.theme-ocean-breeze .item-list-row {
   background: var(--bg-surface);
   border-color: var(--border);
   box-shadow: var(--shadow-sm);
 }
 
-body.theme-ocean-breeze .item-card:hover {
+body.theme-ocean-breeze .item-list-row:hover {
   border-color: var(--border-focus);
   background: var(--bg-hover);
 }
 
-body.theme-ocean-breeze .item-card.selected {
+body.theme-ocean-breeze .item-list-row.selected {
   border-color: var(--accent);
   background: #e0f2fe;
   box-shadow: 0 0 0 3px rgba(2, 132, 199, 0.15);
@@ -2866,18 +2664,18 @@ body.theme-solarized-light #toolbar {
   border-bottom-color: var(--border);
 }
 
-body.theme-solarized-light .item-card {
+body.theme-solarized-light .item-list-row {
   background: var(--bg-surface);
   border-color: var(--border);
   box-shadow: var(--shadow-sm);
 }
 
-body.theme-solarized-light .item-card:hover {
+body.theme-solarized-light .item-list-row:hover {
   border-color: var(--border-focus);
   background: var(--bg-hover);
 }
 
-body.theme-solarized-light .item-card.selected {
+body.theme-solarized-light .item-list-row.selected {
   border-color: var(--accent);
   background: #e4dbbf;
 }
@@ -2965,17 +2763,17 @@ body.theme-nordic-slate #toolbar {
   border-bottom: 1px solid var(--border);
 }
 
-body.theme-nordic-slate .item-card {
+body.theme-nordic-slate .item-list-row {
   background: var(--bg-surface);
   border-color: var(--border);
 }
 
-body.theme-nordic-slate .item-card:hover {
+body.theme-nordic-slate .item-list-row:hover {
   border-color: var(--border-focus);
   background: var(--bg-hover);
 }
 
-body.theme-nordic-slate .item-card.selected {
+body.theme-nordic-slate .item-list-row.selected {
   border-color: var(--accent);
   background: rgba(56, 189, 248, 0.1);
   box-shadow: 0 0 8px rgba(56, 189, 248, 0.2);
@@ -3064,19 +2862,19 @@ body.theme-sunset-blvd #toolbar {
   border-bottom: 1px solid rgba(249, 115, 22, 0.2);
 }
 
-body.theme-sunset-blvd .item-card {
+body.theme-sunset-blvd .item-list-row {
   background: rgba(43, 20, 71, 0.45);
   backdrop-filter: blur(10px);
   border-color: rgba(249, 115, 22, 0.18);
 }
 
-body.theme-sunset-blvd .item-card:hover {
+body.theme-sunset-blvd .item-list-row:hover {
   border-color: var(--border-focus);
   box-shadow: 0 0 16px rgba(249, 115, 22, 0.25);
   transform: translateY(-2px);
 }
 
-body.theme-sunset-blvd .item-card.selected {
+body.theme-sunset-blvd .item-list-row.selected {
   border-color: var(--accent);
   background: rgba(249, 115, 22, 0.2);
   box-shadow: 0 0 20px rgba(249, 115, 22, 0.3);
@@ -3157,17 +2955,17 @@ body.theme-royal-velvet #toolbar {
   border-bottom: 2px solid var(--border);
 }
 
-body.theme-royal-velvet .item-card {
+body.theme-royal-velvet .item-list-row {
   background: var(--bg-surface);
   border-color: var(--border);
 }
 
-body.theme-royal-velvet .item-card:hover {
+body.theme-royal-velvet .item-list-row:hover {
   border-color: var(--border-focus);
   background: var(--bg-hover);
 }
 
-body.theme-royal-velvet .item-card.selected {
+body.theme-royal-velvet .item-list-row.selected {
   border-color: var(--accent);
   background: rgba(251, 191, 36, 0.08);
   box-shadow: 0 0 10px rgba(251, 191, 36, 0.15);
@@ -3256,16 +3054,16 @@ body.theme-minimalist-ink #toolbar {
   border-bottom: 2px solid var(--border);
 }
 
-body.theme-minimalist-ink .item-card {
+body.theme-minimalist-ink .item-list-row {
   background: var(--bg-surface);
   border: 1px solid var(--border);
 }
 
-body.theme-minimalist-ink .item-card:hover {
+body.theme-minimalist-ink .item-list-row:hover {
   background: var(--bg-hover);
 }
 
-body.theme-minimalist-ink .item-card.selected {
+body.theme-minimalist-ink .item-list-row.selected {
   border: 2px solid var(--accent);
   background: #eaeaea;
 }
@@ -3356,17 +3154,17 @@ body.theme-vaporwave #toolbar {
   border-bottom: 2px solid var(--border);
 }
 
-body.theme-vaporwave .item-card {
+body.theme-vaporwave .item-list-row {
   background: rgba(28, 13, 69, 0.5);
   border-color: var(--border);
 }
 
-body.theme-vaporwave .item-card:hover {
+body.theme-vaporwave .item-list-row:hover {
   border-color: var(--border-focus);
   box-shadow: 0 0 12px rgba(255, 0, 127, 0.3);
 }
 
-body.theme-vaporwave .item-card.selected {
+body.theme-vaporwave .item-list-row.selected {
   border-color: var(--text-primary);
   background: rgba(255, 0, 127, 0.15);
   box-shadow: 0 0 18px rgba(0, 242, 254, 0.35);
@@ -3555,7 +3353,7 @@ body.theme-vaporwave .btn-primary:hover {
 
 #app.left-layout {
   display: grid;
-  grid-template-columns: minmax(280px, 360px) auto;
+  grid-template-columns: minmax(280px, 360px) 5px 1fr;
   grid-template-rows: auto 1fr;
   height: 100vh;
 }
@@ -3579,12 +3377,13 @@ body.theme-vaporwave .btn-primary:hover {
   grid-row: 2;
 }
 
-#app.left-layout #splitter {
-  display: none;
+#app.left-layout #left-splitter {
+  grid-column: 2;
+  grid-row: 2;
 }
 
 #app.left-layout #message-box {
-  grid-column: 2;
+  grid-column: 3;
   grid-row: 2;
   height: 100%;
   min-height: 0;
