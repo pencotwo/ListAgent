@@ -3547,3 +3547,47 @@ body.theme-vaporwave .btn-primary:hover {
   max-width: 95vw;
   max-height: 90vh;
 }
+
+
+/* ============================================================
+   左側顯示佈局 (Left Layout)
+   ============================================================ */
+
+#app.left-layout {
+  display: grid;
+  grid-template-columns: minmax(280px, 360px) auto;
+  grid-template-rows: auto 1fr;
+  height: 100vh;
+}
+
+#app.left-layout #toolbar {
+  grid-column: 1 / -1;
+  grid-row: 1;
+}
+
+#app.left-layout #list-container {
+  grid-column: 1;
+  grid-row: 2;
+  overflow-y: auto;
+  border-right: 1px solid var(--border);
+  flex: none;
+  height: auto;
+}
+
+#app.left-layout #empty-state {
+  grid-column: 1;
+  grid-row: 2;
+}
+
+#app.left-layout #splitter {
+  display: none;
+}
+
+#app.left-layout #message-box {
+  grid-column: 2;
+  grid-row: 2;
+  height: 100%;
+  min-height: 0;
+  max-height: none;
+  flex-shrink: 1;
+}

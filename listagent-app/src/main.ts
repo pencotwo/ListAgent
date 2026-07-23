@@ -715,7 +715,7 @@ let viewDetailed = false
 
 // 卡片／列表檢視切換
 const btnListViewToggle = document.getElementById('btn-list-view-toggle') as HTMLButtonElement
-type ViewMode = 'card' | 'list'
+type ViewMode = 'card' | 'list' | 'left'
 const VIEW_MODE_KEY = 'listagent_view_mode'
 let listViewMode: ViewMode = 'card'
 
@@ -755,7 +755,9 @@ function renderList(): void {
     listContainer.classList.remove('card-layout')
   }
 
-  if (listViewMode === 'list') {
+  const useList = listViewMode === 'list' || listViewMode === 'left'
+
+  if (useList) {
     items.forEach((item) => {
       const row = createItemListRow(item)
       listContainer.appendChild(row)
@@ -1616,11 +1618,24 @@ function updateViewToggleUI(): void {
 }
 
 /** 更新列表檢視切換按鈕的視覺狀態 */
+function applyLeftLayout(): void {
+  const app = document.getElementById('app')!
+  if (listViewMode === 'left') {
+    app.classList.add('left-layout')
+  } else {
+    app.classList.remove('left-layout')
+  }
+}
+
 function updateListViewToggleUI(): void {
-  if (listViewMode === 'list') {
+  if (listViewMode === 'left') {
     btnListViewToggle.textContent = '🫧'
     btnListViewToggle.classList.add('active')
     btnListViewToggle.title = '切換為卡片顯示'
+  } else if (listViewMode === 'list') {
+    btnListViewToggle.textContent = '🫧'
+    btnListViewToggle.classList.add('active')
+    btnListViewToggle.title = '切換為左側顯示'
   } else {
     btnListViewToggle.textContent = '🫧'
     btnListViewToggle.classList.remove('active')
@@ -4287,7 +4302,10 @@ btnViewToggle.addEventListener('click', () => {
 // ============================================================
 
 btnListViewToggle.addEventListener('click', () => {
-  listViewMode = listViewMode === 'card' ? 'list' : 'card'
+  if (listViewMode === 'card') listViewMode = 'list'
+  else if (listViewMode === 'list') listViewMode = 'left'
+  else listViewMode = 'card'
+  applyLeftLayout()
   updateListViewToggleUI()
   try { localStorage.setItem(VIEW_MODE_KEY, listViewMode) } catch { /* ignore */ }
   renderList()
@@ -4414,11 +4432,12 @@ if (selectTheme) {
   // 還原使用者偏好的檢視模式
   try {
     const saved = localStorage.getItem(VIEW_MODE_KEY)
-    if (saved === 'card' || saved === 'list') listViewMode = saved
+    if (saved === 'card' || saved === 'list' || saved === 'left') listViewMode = saved
   } catch { /* ignore */ }
 
   updateViewToggleUI()
   updateListViewToggleUI()
+  applyLeftLayout()
   await restorePausedTasks()
   renderList()
   renderScheduledEvents()
