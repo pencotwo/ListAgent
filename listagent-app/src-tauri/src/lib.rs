@@ -2770,13 +2770,14 @@ async fn execute_agent_with_tools(
                     Ok(tools) => {
                         let idx = mcp_clients.len();
                         let openai_tools_all = mcp_tools_to_openai(&tools);
+                        let total_found = openai_tools_all.len();
 
                         let is_mcp_empty = request.selected_mcp_tools.is_empty();
-                        let openai_tools: Vec<Value> = if is_mcp_empty {
-                            openai_tools_all
+                        let filtered: Vec<Value> = if is_mcp_empty {
+                            Vec::new()
                         } else {
                             openai_tools_all
-                                .into_iter()
+                                .iter()
                                 .filter(|t| {
                                     let name = t
                                         .pointer("/function/name")
@@ -2785,8 +2786,50 @@ async fn execute_agent_with_tools(
                                     let qualified = format!("{}::{}", server.name, name);
                                     request.selected_mcp_tools.contains(&qualified)
                                 })
+                                .cloned()
                                 .collect()
                         };
+
+                        // 若這台伺服器的工具全部被目前的勾選清單濾掉，視為過期/不同步的選取狀態，
+                        // 退回「使用該伺服器全部工具」，避免任務被卡死；同時仍發出提示讓使用者知道
+                        // 該重新整理設定對話框裡的勾選清單。
+                        let (openai_tools, stale_selection) =
+                            if is_mcp_empty || total_found == 0 {
+                                (openai_tools_all, false)
+                            } else if filtered.is_empty() {
+                                (openai_tools_all, true)
+                            } else {
+                                (filtered, false)
+                            };
+
+                        if total_found == 0 {
+                            let message =
+                                format!("MCP 伺服器「{}」連線成功，但回報 0 個工具。", server.name);
+                            eprintln!("{message}");
+                            emit_model_exchange(
+                                app_handle,
+                                request,
+                                0,
+                                "mcp_error",
+                                &endpoint,
+                                serde_json::json!({ "message": message }),
+                            );
+                        } else if stale_selection {
+                            let message = format!(
+                                "MCP 伺服器「{}」共有 {total_found} 個工具，但目前 Agent 的 MCP 工具勾選清單（可能已過期）把它們全部過濾掉了，已自動改用該伺服器的全部工具。建議重新開啟設定對話框並重新儲存，以更新勾選清單。",
+                                server.name
+                            );
+                            eprintln!("{message}");
+                            emit_model_exchange(
+                                app_handle,
+                                request,
+                                0,
+                                "mcp_error",
+                                &endpoint,
+                                serde_json::json!({ "message": message }),
+                            );
+                        }
+
                         for t in &openai_tools {
                             if let Some(name) = t.pointer("/function/name").and_then(Value::as_str)
                             {
